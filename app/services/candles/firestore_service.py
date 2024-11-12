@@ -1,12 +1,30 @@
+import os
 from firebase_admin import credentials, firestore, initialize_app
 from datetime import datetime
 import time
+from google.cloud import secretmanager
+from google.oauth2 import service_account
+import json
 
 
 class FirestoreService:
     def __init__(self):
+        # Initialize Secret Manager client
+        secret_client = secretmanager.SecretManagerServiceClient()
+
+        # Access the secret
+        project_id = os.environ.get('PROJECT_ID')
+        secret_name = f"projects/{project_id}/secrets/firestore-sa/versions/latest"
+        response = secret_client.access_secret_version(request={"name": secret_name})
+        secret_content = response.payload.data.decode("UTF-8")
+
+        # Parse the JSON content of the secret
+        service_account_info = json.loads(secret_content)
+
+        # Create credentials from the service account info
+        cred = service_account.Credentials.from_service_account_info(service_account_info)
+
         # Initialize Firebase Admin SDK
-        cred = credentials.Certificate('serviceAccountKey.json')
         initialize_app(cred)
         self.db = firestore.client()
 
