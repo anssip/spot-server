@@ -6,7 +6,7 @@ import time
 class FirestoreService:
     def __init__(self):
         # Initialize Firebase Admin SDK
-        cred = credentials.Certificate('path/to/your/serviceAccountKey.json')
+        cred = credentials.Certificate('serviceAccountKey.json')
         initialize_app(cred)
         self.db = firestore.client()
 
