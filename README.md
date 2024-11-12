@@ -13,6 +13,7 @@ To run the server, run `make dev`.
 
 # Firestore data model
 
+```pre
 firestore/
 ├── live_candles/
 │   └── BTC-USD/  # Document
@@ -35,3 +36,4 @@ firestore/
     │   ├── volume
     │   └── productId
     └── ...
+```
