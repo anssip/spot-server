@@ -51,11 +51,12 @@ class CoinbaseWebSocketClient:
             )
             
             # Subscribe to candles
+            # TODO: handle granularity
             subscribe_message = {
                 "type": "subscribe",
                 "product_ids": ["BTC-USD"],
                 "channel": "candles",
-                "granularity": "ONE_MINUTE"
+                "granularity": "ONE_HOUR"
             }
             await self.websocket.send(json.dumps(subscribe_message))
             self.connected = True
@@ -87,6 +88,7 @@ class CoinbaseWebSocketClient:
                         
                         elif event_type == 'update':
                             for candle in event.get('candles', []):
+                                logger.info(f"Updating candle: {candle}")
                                 await self._process_candle(candle, store_historical=False)
 
             except (websockets.exceptions.ConnectionClosed, TimeoutError) as e:

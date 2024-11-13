@@ -21,20 +21,8 @@ setup_firestore() {
         --project=$PROJECT_ID \
         --location=$LOCATION
 
-    # Set up some basic Firestore rules
-    cat > firestore.rules << EOL
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if false;  // Secure by default, only allow access through service account
-    }
-  }
-}
-EOL
     # Deploy Firestore rules
-    gcloud firestore rules deploy firestore.rules \
-        --project=$PROJECT_ID
+    firebase deploy --only firestore:rules --project=$PROJECT_ID
 
     echo "Firestore setup complete!"
 }
@@ -42,6 +30,8 @@ EOL
 # Check if the database already exists
 if gcloud firestore databases describe --project=$PROJECT_ID &>/dev/null; then
     echo "Firestore database already exists."
+    echo "Updating Firestore rules..."
+    setup_firestore
 else
     echo "Setting up Firestore for project: $PROJECT_ID"
     setup_firestore
