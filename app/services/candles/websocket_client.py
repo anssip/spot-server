@@ -3,6 +3,7 @@ import json
 import logging
 import websockets
 from typing import Callable
+import backoff
 from .models import CandleMessage
 from .firestore_service import FirestoreService
 
@@ -28,50 +29,76 @@ class CoinbaseWebSocketClient:
         self.websocket = None
         self.firestore = FirestoreService()
         self.current_candle_timestamp = None
+        self.reconnect_delay = 1  # Start with 1 second delay
+        self.max_reconnect_delay = 60  # Maximum delay of 60 seconds
+        self.connected = False
 
+    @backoff.on_exception(
+        backoff.expo,
+        (websockets.exceptions.WebSocketException, TimeoutError),
+        max_tries=None,  # Keep trying indefinitely
+        max_time=300,    # Maximum total time for retries
+        on_backoff=lambda details: logger.info(f"Backing off {details['wait']} seconds after {details['tries']} tries")
+    )
     async def connect(self):
-        logger.info("Connecting to Coinbase WebSocket")
-        self.websocket = await websockets.connect(self.ws_url)
-
-        # Subscribe to candles
-        subscribe_message = {
-            "type": "subscribe",
-            "product_ids": ["BTC-USD"],  # Add more pairs as needed
-            "channel": "candles",
-            "granularity": "ONE_MINUTE"  # You can adjust the granularity
-        }
-        await self.websocket.send(json.dumps(subscribe_message))
+        try:
+            logger.info("Connecting to Coinbase WebSocket")
+            self.websocket = await websockets.connect(
+                self.ws_url,
+                ping_interval=20,
+                ping_timeout=20,
+                close_timeout=10
+            )
+            
+            # Subscribe to candles
+            subscribe_message = {
+                "type": "subscribe",
+                "product_ids": ["BTC-USD"],
+                "channel": "candles",
+                "granularity": "ONE_MINUTE"
+            }
+            await self.websocket.send(json.dumps(subscribe_message))
+            self.connected = True
+            logger.info("Successfully connected and subscribed")
+            
+        except Exception as e:
+            self.connected = False
+            logger.error(f"Connection error: {e}")
+            raise  # Re-raise for backoff to handle
 
     async def listen(self):
         while True:
             try:
+                if not self.connected:
+                    await self.connect()
+                
                 message = await self.websocket.recv()
                 data = json.loads(message)
                 logger.info("Received message")
 
-                # Handle events array
                 if 'events' in data:
                     for event in data['events']:
                         event_type = event.get('type')
                         logger.info(f"Event type: {event_type}")
 
-                        # Process candles based on event type
                         if event_type == 'snapshot':
-                            # Handle historical candles in snapshot
                             for candle in event.get('candles', []):
                                 await self._process_candle(candle, store_historical=True)
                         
                         elif event_type == 'update':
-                            # Handle live candle updates
                             for candle in event.get('candles', []):
                                 await self._process_candle(candle, store_historical=False)
 
-            except websockets.exceptions.ConnectionClosed:
-                logger.error("Connection closed. Reconnecting...")
-                await self.connect()
+            except (websockets.exceptions.ConnectionClosed, TimeoutError) as e:
+                self.connected = False
+                logger.error(f"Connection error: {e}")
+                await asyncio.sleep(1)  # Brief pause before reconnect attempt
+                continue
+                
             except Exception as e:
-                logger.error(f"Error: {e}")
+                logger.error(f"Unexpected error: {e}")
                 await asyncio.sleep(1)
+                continue
 
     async def _process_candle(self, candle: dict, store_historical: bool):
         """Helper method to process individual candles"""
