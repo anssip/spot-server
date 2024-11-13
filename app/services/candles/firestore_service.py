@@ -9,20 +9,20 @@ import json
 
 class FirestoreService:
     def __init__(self):
-        # Initialize Secret Manager client
-        secret_client = secretmanager.SecretManagerServiceClient()
-
-        # Access the secret
-        project_id = os.environ.get('PROJECT_ID')
-        secret_name = f"projects/{project_id}/secrets/firestore-sa/versions/latest"
-        response = secret_client.access_secret_version(request={"name": secret_name})
-        secret_content = response.payload.data.decode("UTF-8")
-
-        # Parse the JSON content of the secret
-        service_account_info = json.loads(secret_content)
-
-        # Create credentials from the service account info
-        cred = service_account.Credentials.from_service_account_info(service_account_info)
+        env = os.getenv('ENVIRONMENT', 'development')
+        
+        if env == 'development':
+            # Use local service account file for development
+            cred = credentials.Certificate('serviceAccountKey.json')
+        else:
+            # Use Secret Manager for production
+            secret_client = secretmanager.SecretManagerServiceClient()
+            project_id = os.environ.get('PROJECT_ID')
+            secret_name = f"projects/{project_id}/secrets/firestore-sa/versions/latest"
+            response = secret_client.access_secret_version(request={"name": secret_name})
+            secret_content = response.payload.data.decode("UTF-8")
+            service_account_info = json.loads(secret_content)
+            cred = credentials.Certificate(service_account_info)
 
         # Initialize Firebase Admin SDK
         initialize_app(cred)
