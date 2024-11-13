@@ -6,6 +6,11 @@ from typing import Callable
 import backoff
 from .models import CandleMessage
 from .firestore_service import FirestoreService
+from collections import defaultdict
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Optional, List
 
 # Create a formatter
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -23,6 +28,73 @@ console_handler.setFormatter(formatter)
 if not logger.handlers:
     logger.addHandler(console_handler)
 
+@dataclass
+class CandleBuffer:
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+    first_timestamp: int
+    last_timestamp: int
+
+class CandleAggregator:
+    def __init__(self):
+        self.hourly_candles = defaultdict(dict)
+    
+    def update_hourly_candle(self, product_id: str, candle_data: List) -> tuple[List, bool]:
+        """
+        Takes a 5-min candle and returns:
+        - The current state of the hourly candle
+        - Boolean indicating if the candle is completed
+        """
+        timestamp, low, high, open_price, close, volume = candle_data
+        
+        # Calculate the start of the current hour
+        hour_timestamp = timestamp - (timestamp % 3600)  # Round down to nearest hour
+        key = (product_id, hour_timestamp)
+
+        current = self.hourly_candles[key]
+        
+        if not current:
+            # First 5-min candle for this hour
+            current = CandleBuffer(
+                open=open_price,
+                high=high,
+                low=low,
+                close=close,
+                volume=volume,
+                first_timestamp=timestamp,
+                last_timestamp=timestamp
+            )
+        else:
+            # Update existing hourly candle
+            current.high = max(current.high, high)
+            current.low = min(current.low, low)
+            current.close = close
+            current.volume += volume
+            current.last_timestamp = timestamp
+
+        self.hourly_candles[key] = current
+
+        # Always emit the current state
+        hourly_data = [
+            hour_timestamp,  # Always use the hour-aligned timestamp
+            current.low,
+            current.high,
+            current.open,
+            current.close,
+            current.volume
+        ]
+
+        # Check if the hour is complete (difference >= 3600 seconds)
+        is_complete = (current.last_timestamp - hour_timestamp) >= 3600
+        if is_complete:
+            # Clean up the completed hour
+            del self.hourly_candles[key]
+
+        return hourly_data, is_complete
+
 class CoinbaseWebSocketClient:
     def __init__(self):
         self.ws_url = "wss://advanced-trade-ws.coinbase.com"
@@ -32,6 +104,7 @@ class CoinbaseWebSocketClient:
         self.reconnect_delay = 1  # Start with 1 second delay
         self.max_reconnect_delay = 60  # Maximum delay of 60 seconds
         self.connected = False
+        self.aggregator = CandleAggregator()
 
     @backoff.on_exception(
         backoff.expo,
@@ -115,12 +188,18 @@ class CoinbaseWebSocketClient:
                 float(candle['volume'])
             ]
             
-            # Always update live candle
-            await self.firestore.update_live_candle(product_id, candle_data)
+            # Always update live 5-min candle
+            await self.firestore.update_live_candle(f"{product_id}_5m", candle_data)
 
-            # Store historical candle only for snapshots
-            if store_historical:
-                await self.firestore.store_completed_candle(product_id, candle_data)
+            # Get current state of hourly candle and whether it's complete
+            hourly_candle, is_complete = self.aggregator.update_hourly_candle(product_id, candle_data)
+            
+            # Always update live hourly candle
+            await self.firestore.update_live_candle(product_id, hourly_candle)
+            
+            # Store historical candle only
+            if is_complete and store_historical:
+                await self.firestore.store_completed_candle(product_id, hourly_candle)
                 
         except Exception as e:
-            logger.error(f"Error processing candle: {e}")
+            logger.error(f"Error processing candle: {e}", exc_info=True)
