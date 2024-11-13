@@ -1,0 +1,16 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /live_candles/{candleId} {
+      allow read: if true;  // Allow public read access to live candles
+      allow write: if false;  // Only backend can write
+    }
+    match /historical_candles/{candleId} {
+      allow read: if true;  // Allow public read access to historical candles
+      allow write: if false;  // Only backend can write
+    }
+    match /{document=**} {
+      allow read, write: if false;  // Restrict access to all other collections
+    }
+  }
+}
