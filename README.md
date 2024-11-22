@@ -10,6 +10,12 @@ To install the dependencies, run `make install`.
 
 To run the server, run `make dev`.
 
+## Deployment
+
+```bash
+./scripts/deploy.sh
+```
+
 
 # Firestore data model
 
