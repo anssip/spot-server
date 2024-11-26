@@ -5,28 +5,13 @@ import time
 from google.cloud import secretmanager
 from google.oauth2 import service_account
 import json
+from app.services.db.db_helper import DbHelper
 
 
 class FirestoreService:
     def __init__(self):
-        env = os.getenv('ENVIRONMENT', 'development')
-        
-        if env == 'development':
-            # Use local service account file for development
-            cred = credentials.Certificate('serviceAccountKey.json')
-        else:
-            # Use Secret Manager for production
-            secret_client = secretmanager.SecretManagerServiceClient()
-            project_id = os.environ.get('PROJECT_ID')
-            secret_name = f"projects/{project_id}/secrets/firestore-sa/versions/latest"
-            response = secret_client.access_secret_version(request={"name": secret_name})
-            secret_content = response.payload.data.decode("UTF-8")
-            service_account_info = json.loads(secret_content)
-            cred = credentials.Certificate(service_account_info)
-
-        # Initialize Firebase Admin SDK
-        initialize_app(cred)
-        self.db = firestore.client()
+        self.db_helper = DbHelper()
+        self.db = self.db_helper.get_client()
 
     async def update_live_candle(self, product_id: str, candle_data: list):
         """
