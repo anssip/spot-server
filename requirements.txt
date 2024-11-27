@@ -52,7 +52,3 @@ uvicorn==0.32.0
 websockets==14.0
 backoff==2.2.1
 async-timeout==4.0.3
-functions-framework==3.*
-requests==2.*
-google-cloud-firestore==2.*
-firebase-admin==6.*
