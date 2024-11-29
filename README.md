@@ -16,7 +16,6 @@ To run the server, run `make dev`.
 ./scripts/deploy.sh
 ```
 
-
 # Firestore data model
 
 ```pre
@@ -42,4 +41,18 @@ firestore/
     │   ├── volume
     │   └── productId
     └── ...
+```
+
+## Firestore rules and indexes
+
+To deploy the firestore rules from `firestore.rules` file, run:
+
+```bash
+make firestore-rules
+```
+
+To deploy the firestore indexes from `firestore.indexes.json` file, run:
+
+```bash
+make firestore-indexes
 ```

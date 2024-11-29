@@ -1,16 +1,30 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Allow reading the trading_pairs collection and all nested paths
+    match /trading_pairs/{document=**} {
+      allow read: if true;
+    }
+
+    // Keep your existing rules
     match /live_candles/{candleId} {
-      allow read: if true;  // Allow public read access to live candles
-      allow write: if false;  // Only backend can write
+      allow read: if true;
+      allow write: if false;
     }
+
     match /historical_candles/{candleId} {
-      allow read: if true;  // Allow public read access to historical candles
-      allow write: if false;  // Only backend can write
+      allow read: if true;
+      allow write: if false;
     }
+
+    // Collection group rule for exchange products
+    match /{path=**}/coinbase/{productId} {
+      allow read: if true;
+    }
+
+    // Default deny for everything else
     match /{document=**} {
-      allow read, write: if false;  // Restrict access to all other collections
+      allow read, write: if false;
     }
   }
 }
