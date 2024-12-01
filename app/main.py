@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
@@ -170,43 +170,95 @@ async def start_websocket_clients():
         product_groups = partition_products(product_ids, size=4)
         logger.debug(f"Created {len(product_groups)} websocket groups")
         
-        websocket_clients = []
-        
-        for i, product_group in enumerate(product_groups):
+        async def start_client(group_id: int, product_group: list) -> Optional[CoinbaseWebSocketClient]:
             if shutdown_event.is_set():
-                logger.info("Shutdown signal received, stopping client creation")
-                break
+                return None
                 
-            logger.debug(f"Creating client {i} for group: {product_group}")
+            logger.debug(f"Creating client {group_id} for group: {product_group}")
             
             for attempt in range(3):
                 try:
                     client = CoinbaseWebSocketClient(
                         product_group, 
-                        f"ws_client_{i}", 
+                        f"ws_client_{group_id}", 
                         firestore_service
                     )
                     
                     async with async_timeout.timeout(45):
                         await client.connect()
                         
-                    websocket_clients.append(client)
+                    # Start listening in a separate task
                     asyncio.create_task(client.listen())
-                    logger.debug(f"Started websocket client {i} for products: {product_group}")
-                    
-                    await asyncio.sleep(2)
-                    break
+                    logger.debug(f"Started websocket client {group_id} for products: {product_group}")
+                    return client
                     
                 except Exception as e:
                     if shutdown_event.is_set():
                         logger.info("Shutdown signal received during retry, aborting")
-                        return websocket_clients
-                    logger.error(f"Error creating client {i} (attempt {attempt + 1}): {e}")
+                        return None
+                    logger.error(f"Error creating client {group_id} (attempt {attempt + 1}): {e}")
                     if attempt == 2:
-                        logger.error(f"Failed to create client {i} after 3 attempts")
-                    else:
-                        await asyncio.sleep(5)
+                        logger.error(f"Failed to create client {group_id} after 3 attempts")
+                        return None
+                    await asyncio.sleep(5)
+            
+            return None
+
+        # Start clients in smaller batches with more time between attempts
+        batch_size = 5  # Reduced from 10
+        all_clients = []
+        failed_groups = []  # Track failed groups for retry
         
+        for i in range(0, len(product_groups), batch_size):
+            if shutdown_event.is_set():
+                break
+                
+            batch = product_groups[i:i + batch_size]
+            client_tasks = [
+                start_client(j + i, group) 
+                for j, group in enumerate(batch)
+            ]
+            
+            try:
+                # Increase timeout for the entire batch
+                async with async_timeout.timeout(90):  # 90 seconds per batch
+                    batch_results = await asyncio.gather(*client_tasks, return_exceptions=True)
+                    
+                    # Process results and track failures
+                    for j, result in enumerate(batch_results):
+                        if isinstance(result, Exception):
+                            logger.error(f"Batch {i//batch_size} client {j} failed: {result}")
+                            failed_groups.append((i + j, batch[j]))
+                        elif result is not None:
+                            all_clients.append(result)
+                
+                # Longer delay between batches
+                if i + batch_size < len(product_groups):
+                    await asyncio.sleep(5)  # Increased from 2
+                    
+            except asyncio.TimeoutError:
+                logger.error(f"Batch {i//batch_size} timed out")
+                failed_groups.extend([(i + j, group) for j, group in enumerate(batch)])
+        
+        # Retry failed groups once more
+        if failed_groups and not shutdown_event.is_set():
+            logger.info(f"Retrying {len(failed_groups)} failed groups...")
+            await asyncio.sleep(10)  # Wait before retrying
+            
+            for group_id, group in failed_groups:
+                try:
+                    client = await start_client(group_id, group)
+                    if client:
+                        all_clients.append(client)
+                except Exception as e:
+                    logger.error(f"Final retry failed for group {group_id}: {e}")
+        
+        websocket_clients = all_clients
+        
+        if not websocket_clients:
+            logger.error("No websocket clients were successfully created!")
+            raise Exception("Failed to create any websocket clients")
+            
         logger.info(f"Successfully created {len(websocket_clients)} websocket clients")
         return websocket_clients
             
