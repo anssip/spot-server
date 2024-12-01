@@ -149,25 +149,38 @@ def partition_products(products: List[str], size: int = 5) -> List[List[str]]:
     """Split products into smaller groups for better performance"""
     return [products[i:i + size] for i in range(0, len(products), size)]
 
+# Add environment variable for shard configuration
+SHARD_COUNT = int(os.getenv('SHARD_COUNT', '10'))  # Total number of shards
+SHARD_INDEX = int(os.getenv('SHARD_INDEX', '0'))   # Which shard this container is
+
 async def start_websocket_clients():
     try:
         global firestore_service, websocket_clients
         firestore_service = FirestoreService()
         
+        products = await firestore_service.get_products('coinbase', 'online')
+        product_ids = [p.source for p in products]
+        
+        # Shard the products
+        products_per_shard = len(product_ids) // SHARD_COUNT
+        start_idx = SHARD_INDEX * products_per_shard
+        end_idx = start_idx + products_per_shard if SHARD_INDEX < SHARD_COUNT - 1 else len(product_ids)
+        
+        # Get this shard's products
+        shard_products = product_ids[start_idx:end_idx]
+        logger.info(f"Shard {SHARD_INDEX}/{SHARD_COUNT} handling {len(shard_products)} products: {shard_products}")
+        
         if shutdown_event.is_set():
             logger.info("Shutdown signal received during startup, aborting client creation")
             return []
             
-        products = await firestore_service.get_products('coinbase', 'online')
-        product_ids = [p.source for p in products]
+        logger.debug(f"Found {len(shard_products)} active products")
         
-        logger.debug(f"Found {len(product_ids)} active products")
-        
-        if not product_ids:
+        if not shard_products:
             logger.error("No active products found!")
             return []
             
-        product_groups = partition_products(product_ids, size=4)
+        product_groups = partition_products(shard_products, size=4)
         logger.debug(f"Created {len(product_groups)} websocket groups")
         
         async def start_client(group_id: int, product_group: list) -> Optional[CoinbaseWebSocketClient]:
