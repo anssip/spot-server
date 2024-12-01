@@ -39,13 +39,23 @@ startup_complete = asyncio.Event()
 app_ready = asyncio.Event()
 
 def signal_handler(sig, frame):
+    """Handle shutdown signals"""
     logger.info(f"Received signal {sig}, initiating shutdown...")
-    if not shutdown_event.is_set():
-        shutdown_event.set()
-        # Force exit if we haven't completed startup
-        if not startup_complete.is_set():
-            logger.info("Forcing exit during startup phase")
-            sys.exit(1)
+    
+    # Just disconnect all clients immediately
+    if websocket_clients:
+        for client in websocket_clients:
+            client.should_run = False
+            if client.websocket:
+                loop = asyncio.get_event_loop()
+                loop.create_task(client.websocket.close())
+    
+    # Exit after a short delay
+    sys.exit(0)
+
+# Register signal handlers
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
 # Module-level initialization
 app = FastAPI()
@@ -101,28 +111,18 @@ async def health_check():
 async def lifespan(app: FastAPI):
     """Lifecycle manager for the FastAPI application"""
     try:
-        # Start WebSocket client initialization in a background task
         init_task = asyncio.create_task(initialize_websocket_clients())
-        startup_complete.set()  # Mark that we've started initialization
-        
-        logger.info("Application startup initiated, beginning WebSocket client initialization")
+        startup_complete.set()
+        logger.info("Application startup initiated")
         yield
         
     finally:
         logger.info("Shutting down application...")
         if websocket_clients:
-            shutdown_tasks = []
             for client in websocket_clients:
                 client.should_run = False
-                shutdown_tasks.append(client.disconnect())
-            
-            try:
-                async with async_timeout.timeout(30):
-                    await asyncio.gather(*shutdown_tasks)
-            except asyncio.TimeoutError:
-                logger.warning("Shutdown timed out while waiting for websocket clients")
-            except Exception as e:
-                logger.error(f"Error during shutdown: {e}")
+                if client.websocket:
+                    await client.websocket.close()
         
         startup_complete.clear()
         app_ready.clear()
@@ -140,7 +140,6 @@ async def initialize_websocket_clients():
             logger.error("Failed to initialize WebSocket clients")
     except Exception as e:
         logger.error(f"Error initializing WebSocket clients: {e}")
-        # Don't re-raise the exception - let the application continue running
 
 # Add lifespan to FastAPI app
 app.router.lifespan_context = lifespan
@@ -280,6 +279,7 @@ async def start_websocket_clients():
         raise
 
 if __name__ == "__main__":
+    # Add graceful shutdown config to uvicorn
     port = int(os.getenv("PORT", "8080"))
     uvicorn.run(
         "app.main:app",
