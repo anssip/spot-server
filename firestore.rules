@@ -1,24 +1,34 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow reading the trading_pairs collection and all nested paths
+    // Allow reading and subscribing to the trading_pairs collection and all nested paths
     match /trading_pairs/{document=**} {
       allow read: if true;
     }
 
-    // Keep your existing rules
+    // Allow reading and subscribing to the exchanges collection and all nested products
+    match /exchanges/{exchange}/products/{productId=**} {
+      allow read: if true;
+    }
+
+    // Allow reading live candles
     match /live_candles/{candleId} {
       allow read: if true;
       allow write: if false;
     }
 
+    // Allow reading historical candles
     match /historical_candles/{candleId} {
       allow read: if true;
       allow write: if false;
     }
 
-    // Collection group rule for exchange products
-    match /{path=**}/coinbase/{productId} {
+    // Collection group rules for better querying
+    match /{path=**}/products/{productId} {
+      allow read: if true;
+    }
+
+    match /{path=**}/intervals/{interval} {
       allow read: if true;
     }
 
