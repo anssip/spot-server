@@ -196,17 +196,25 @@ class CoinbaseWebSocketClient:
             try:
                 if not self.connected:
                     success = await self.connect()
-                    if not success:
+                    if not success or not self.should_run:  # Check shutdown flag
                         await asyncio.sleep(self.RECONNECT_DELAY)
                         continue
 
                 async with async_timeout.timeout(self.MAX_MESSAGE_GAP):
                     message = await self.websocket.recv()
+                    if not self.should_run:  # Check shutdown flag
+                        break
                     
                     # Process message
                     await self._handle_message(message)
 
+            except asyncio.CancelledError:
+                logger.info(f"{self.client_id}: Listen task cancelled")
+                break
+                
             except asyncio.TimeoutError:
+                if not self.should_run:  # Check shutdown flag
+                    break
                 logger.warning(f"{self.client_id}: Message timeout - initiating reconnect")
                 self.connected = False
                 if self.websocket:
@@ -214,14 +222,20 @@ class CoinbaseWebSocketClient:
                 continue
                 
             except websockets.exceptions.ConnectionClosed:
+                if not self.should_run:  # Check shutdown flag
+                    break
                 logger.warning(f"{self.client_id}: Connection closed - initiating reconnect")
                 self.connected = False
                 continue
                 
             except Exception as e:
+                if not self.should_run:  # Check shutdown flag
+                    break
                 logger.error(f"{self.client_id}: Error in listen loop: {e}")
                 self.connected = False
                 await asyncio.sleep(self.RECONNECT_DELAY)
+
+        logger.info(f"{self.client_id}: Listen loop ended")
 
     async def _check_connection_health(self):
         """Monitor connection health with improved checks"""
@@ -276,13 +290,14 @@ class CoinbaseWebSocketClient:
             message = json.loads(raw_message)
             message_type = message.get("type")
 
-            print(f"Message: {message}")
+            print(f"Message type: {message_type}, channel: {message.get('channel')}")
             
             # First check if it's a candles message regardless of type
             if message.get('channel') == 'candles':
                 events = message.get('events', [])
                 for event in events:
                     event_type = event.get('type')
+                    print(f"Event type: {event_type}")
                     if event_type == 'snapshot':
                         log_level = logging.INFO if during_connect else logging.DEBUG
                         logger.log(log_level, f"{self.client_id}: Processing candle snapshot")
