@@ -95,9 +95,9 @@ class CoinbaseWebSocketClient:
         self.should_run = True
         self.connection_attempts = 0
         self.last_message_time = None
-        self.HEARTBEAT_INTERVAL = 30  # seconds
-        self.MAX_MESSAGE_GAP = 60  # seconds
-        self.MAX_RETRIES_BEFORE_RESTART = 10
+        self.HEARTBEAT_INTERVAL = 30  # Check every 30 seconds instead of 1 hour
+        self.MAX_MESSAGE_GAP = 120    # Allow 2 minutes before forcing reconnect
+        self.MAX_RETRIES_BEFORE_RESTART = 20  # Allow more retries
         self.product_ids = product_ids
         self.client_id = client_id
         self._health_check_task = None
@@ -111,15 +111,15 @@ class CoinbaseWebSocketClient:
             self.connection_attempts += 1
             logger.info(f"{self.client_id}: Connecting to Coinbase WebSocket (attempt {self.connection_attempts})")
             
-            # Add connection timeout
-            async with async_timeout.timeout(30):
+            # Increase connection timeout
+            async with async_timeout.timeout(60):  # Increased from 30
                 self.websocket = await websockets.connect(
                     self.ws_url,
                     ping_interval=20,
-                    ping_timeout=20,
-                    close_timeout=10,
+                    ping_timeout=30,    # Increased from 20
+                    close_timeout=20,   # Increased from 10
                     compression=None,
-                    max_size=None  # Allow larger messages
+                    max_size=None
                 )
             
             subscribe_message = {
@@ -296,7 +296,7 @@ class CoinbaseWebSocketClient:
                             await self.websocket.close()
                 
                 if self.connection_attempts >= self.MAX_RETRIES_BEFORE_RESTART:
-                    logger.error("Max connection attempts reached. Initiating full restart...")
+                    logger.error(f"Max connection attempts ({self.MAX_RETRIES_BEFORE_RESTART}) reached. Initiating full restart...")
                     self.should_run = False
                     sys.exit(1)  # Process manager should restart the service
                     
