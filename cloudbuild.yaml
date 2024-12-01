@@ -1,46 +1,47 @@
 steps:
   # Build the container image
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/$PROJECT_ID/spotcanvas-api', '.']
-  
+  - name: "gcr.io/cloud-builders/docker"
+    args: ["build", "-t", "gcr.io/$PROJECT_ID/spotcanvas-api", "."]
+
   # Push the container image to Container Registry
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'gcr.io/$PROJECT_ID/spotcanvas-api']
-  
+  - name: "gcr.io/cloud-builders/docker"
+    args: ["push", "gcr.io/$PROJECT_ID/spotcanvas-api"]
+
   # Deploy container image to Cloud Run
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
     entrypoint: gcloud
     args:
-    - 'run'
-    - 'deploy'
-    - 'spotcanvas-api'
-    - '--image'
-    - 'gcr.io/$PROJECT_ID/spotcanvas-api'
-    - '--region'
-    - '$_REGION'
-    - '--platform'
-    - 'managed'
-    - '--allow-unauthenticated'
-    - '--set-env-vars'
-    - 'PROJECT_ID=$PROJECT_ID,ENVIRONMENT=production'
-    - '--memory'
-    - '512Mi'
-    - '--min-instances'
-    - '1'
-    - '--max-instances'
-    - '10'
-    - '--timeout'
-    - '300s'
-    - '--port'
-    - '8080'
-    - '--cpu'
-    - '1'
-    - '--use-http2'
+      - "run"
+      - "deploy"
+      - "spotcanvas-api"
+      - "--image"
+      - "gcr.io/$PROJECT_ID/spotcanvas-api"
+      - "--region"
+      - "$_REGION"
+      - "--platform"
+      - "managed"
+      - "--allow-unauthenticated"
+      - "--set-env-vars"
+      - "PROJECT_ID=$PROJECT_ID,ENVIRONMENT=production"
+      - "--memory"
+      - "512Mi"
+      - "--min-instances"
+      - "1"
+      - "--max-instances"
+      - "10"
+      - "--timeout"
+      - "300s"
+      - "--port"
+      - "8080"
+      - "--cpu"
+      - "1"
+      - "--use-http2"
+      - "--cpu-boost"
 
 substitutions:
   _REGION: europe-west1
 
 images:
-  - 'gcr.io/$PROJECT_ID/spotcanvas-api'
+  - "gcr.io/$PROJECT_ID/spotcanvas-api"
 
-timeout: 1800s 
+timeout: 1800s
