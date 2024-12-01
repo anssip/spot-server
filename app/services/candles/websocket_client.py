@@ -107,63 +107,56 @@ class CoinbaseWebSocketClient:
         
         logger.info(f"Initialized {client_id} for products: {product_ids}")
 
-    async def connect(self) -> bool:
+    async def connect(self) -> tuple[bool, str]:
         """Connect to the WebSocket with improved error handling"""
         self.connection_attempts += 1
-        logger.info(f"{self.client_id}: Connecting to Coinbase WebSocket (attempt {self.connection_attempts})")
+        logger.info(f"{self.client_id}/{self.product_ids}: Connecting to Coinbase WebSocket (attempt {self.connection_attempts})")
         
         try:
-            # Use connect with explicit timeout
-            async with async_timeout.timeout(self.CONNECT_TIMEOUT):
-                self.websocket = await websockets.connect(
-                    self.uri,
-                    ping_interval=20,
-                    ping_timeout=30,
-                    close_timeout=20,
-                )
+            async with async_timeout.timeout(45):
+                try:
+                    self.websocket = await websockets.connect(
+                        self.uri,
+                        ping_interval=20,
+                        ping_timeout=30,
+                        close_timeout=20,
+                    )
+                except Exception as conn_err:
+                    return False, f"WebSocket connection error: {str(conn_err)}"
 
-            # Send subscription message
-            subscribe_message = {
-                "type": "subscribe",
-                "product_ids": self.product_ids,
-                "channel": "candles",
-                "granularity": "ONE_HOUR"
-            }
-            
-            async with async_timeout.timeout(5):
+                # Update subscription message with ONE_MINUTE granularity
+                subscribe_message = {
+                    "type": "subscribe",
+                    "product_ids": self.product_ids,
+                    "channel": "candles",
+                    "granularity": "ONE_MINUTE"  # Changed from ONE_HOUR to get more frequent updates
+                }
+                
+                logger.info(f"{self.client_id}/{self.product_ids}: Sending subscription: {subscribe_message}")
                 await self.websocket.send(json.dumps(subscribe_message))
                 
-                # Wait for subscription confirmation
-                while True:
+                subscription_timeout = time.time() + 30
+                while time.time() < subscription_timeout:
                     response = await self.websocket.recv()
-                    result = await self._handle_message(response, during_connect=True)
-                    if result == "subscribed":
-                        break
-                    
-                    if time.time() - self.last_message_time > self.CONNECT_TIMEOUT:
-                        raise Exception("Subscription confirmation timeout")
+                    message = json.loads(response)
+                    logger.debug(f"{self.client_id}/{self.product_ids}: Message received in connect: {message}")
 
-            self.connected = True
-            logger.info(f"{self.client_id}: Successfully connected and subscribed to {len(self.product_ids)} products")
-            
-            # Reset connection attempts on successful connection
-            self.connection_attempts = 0
-            
-            # Start health check if not already running
-            if not self._health_check_task or self._health_check_task.done():
-                self._health_check_task = asyncio.create_task(self._check_connection_health())
-            
-            return True
+                    if message.get('channel') == 'subscriptions':
+                        self.connected = True
+                        self.connection_attempts = 0
+                        logger.info(f"{self.client_id}/{self.product_ids}: Successfully connected and subscribed")
+                        return True, "Connected successfully"
+                    elif message.get('type') == 'error':
+                        error_msg = message.get('message', 'Unknown error')
+                        return False, f"Subscription error: {error_msg}"
+                        
+                return False, "Subscription confirmation timeout"
 
         except asyncio.TimeoutError:
-            logger.error(f"{self.client_id}: Connection timed out")
-            self.connected = False
-            return False
+            return False, "Connection timed out"
             
         except Exception as e:
-            logger.error(f"{self.client_id}: Connection error: {e}")
-            self.connected = False
-            return False
+            return False, f"Connection error: {str(e)}"
 
     async def _process_candle(self, candle: dict, store_historical: bool):
         """Helper method to process individual candles"""
@@ -177,7 +170,8 @@ class CoinbaseWebSocketClient:
                 float(candle['close']),
                 float(candle['volume'])
             ]
-            
+
+            logger.info(f"{self.client_id}/{self.product_ids}: Processing candle for {product_id}: {candle_data}")
             # Store live candle under exchanges/coinbase/products/product_id structure
             await self.firestore.update_live_candle(f"exchanges/coinbase/products/{product_id}", candle_data)
 
@@ -192,50 +186,58 @@ class CoinbaseWebSocketClient:
 
     async def listen(self):
         """Main listening loop with improved error handling"""
+        logger.info(f"{self.client_id}/{self.product_ids}: Starting listen loop")
+        
         while self.should_run:
             try:
                 if not self.connected:
-                    success = await self.connect()
-                    if not success or not self.should_run:  # Check shutdown flag
+                    logger.info(f"{self.client_id}/{self.product_ids}: Not connected in listen loop: Attempting to connect")
+                    success, status = await self.connect()
+                    if not success or not self.should_run:
+                        logger.warning(f"{self.client_id}/{self.product_ids}: Connection failed: {status}")
                         await asyncio.sleep(self.RECONNECT_DELAY)
                         continue
 
                 async with async_timeout.timeout(self.MAX_MESSAGE_GAP):
+                    logger.info(f"{self.client_id}/{self.product_ids}: Waiting for message")
                     message = await self.websocket.recv()
-                    if not self.should_run:  # Check shutdown flag
+                    logger.debug(f"{self.client_id}/{self.product_ids}: Message received: {message}")
+                    
+                    if not self.should_run:
+                        logger.info(f"{self.client_id}/{self.product_ids}: Shutdown requested, exiting listen loop")
                         break
                     
                     # Process message
                     await self._handle_message(message)
 
             except asyncio.CancelledError:
-                logger.info(f"{self.client_id}: Listen task cancelled")
+                logger.info(f"{self.client_id}/{self.product_ids}: Listen task cancelled")
                 break
                 
             except asyncio.TimeoutError:
-                if not self.should_run:  # Check shutdown flag
+                if not self.should_run:
                     break
-                logger.warning(f"{self.client_id}: Message timeout - initiating reconnect")
+                logger.warning(f"{self.client_id}/{self.product_ids}: Message timeout - initiating reconnect")
                 self.connected = False
                 if self.websocket:
                     await self.websocket.close()
                 continue
                 
             except websockets.exceptions.ConnectionClosed:
-                if not self.should_run:  # Check shutdown flag
+                if not self.should_run:
                     break
-                logger.warning(f"{self.client_id}: Connection closed - initiating reconnect")
+                logger.warning(f"{self.client_id}/{self.product_ids}: Connection closed - initiating reconnect")
                 self.connected = False
                 continue
                 
             except Exception as e:
-                if not self.should_run:  # Check shutdown flag
+                if not self.should_run:
                     break
-                logger.error(f"{self.client_id}: Error in listen loop: {e}")
+                logger.error(f"{self.client_id}/{self.product_ids}: Error in listen loop: {e}", exc_info=True)
                 self.connected = False
                 await asyncio.sleep(self.RECONNECT_DELAY)
 
-        logger.info(f"{self.client_id}: Listen loop ended")
+        logger.info(f"{self.client_id}/{self.product_ids}: Listen loop ended")
 
     async def _check_connection_health(self):
         """Monitor connection health with improved checks"""
@@ -279,79 +281,58 @@ class CoinbaseWebSocketClient:
         except Exception as e:
             logger.error(f"{self.client_id}: Error disconnecting websocket: {e}")
 
-    async def _handle_message(self, raw_message: str, during_connect: bool = False):
-        """Process incoming WebSocket messages
-        
-        Args:
-            raw_message: The raw message from websocket
-            during_connect: Whether this is during connection phase
-        """
+    async def _handle_message(self, raw_message: str):
+        """Process incoming WebSocket messages"""
         try:
             message = json.loads(raw_message)
-            message_type = message.get("type")
+            logger.info(f"{self.client_id}/{self.product_ids}: Message: {message}")
 
-            print(f"Message type: {message_type}, channel: {message.get('channel')}")
+            message_type = message.get("type")
+            channel = message.get("channel")
+
+            logger.debug(f"{self.client_id}/{self.product_ids}: Message type: {message_type}, channel: {channel}")
             
-            # First check if it's a candles message regardless of type
-            if message.get('channel') == 'candles':
+            # Handle subscription messages
+            if channel == 'subscriptions':
+                logger.info(f"{self.client_id}/{self.product_ids}: Received subscription update")
+                return
+            
+            # Handle candle messages
+            # {'channel': 'candles', 'client_id': '', 'timestamp': '2024-12-01T14:14:35.576866765Z', 'sequence_num': 5, 'events': [{'type': 'update', 'candles': [{'start': '1733062200', 'high': '97299.99', 'low': '97199.63', 'open': '97285.3', 'close': '97199.63', 'volume': '8.25478631', 'product_id': 'BTC-USD'}]}]}
+
+            elif channel == 'candles':
                 events = message.get('events', [])
                 for event in events:
                     event_type = event.get('type')
-                    print(f"Event type: {event_type}")
                     if event_type == 'snapshot':
-                        log_level = logging.INFO if during_connect else logging.DEBUG
-                        logger.log(log_level, f"{self.client_id}: Processing candle snapshot")
-                        # Process each candle in the snapshot
+                        logger.info(f"{self.client_id}/{self.product_ids}: Processing candle snapshot")
                         for candle in event.get('candles', []):
-                            try:
-                                await self._process_candle(candle, store_historical=True)
-                            except Exception as e:
-                                logger.error(f"{self.client_id}: Error processing snapshot candle: {e}")
-                                if during_connect:
-                                    raise
+                            await self._process_candle(candle, store_historical=True)
                                 
                     elif event_type == 'update':
-                        # Process the update candle
-                        try:
-                            candle = event.get('candle', {})
-                            if not candle:  # Skip empty updates silently
-                                continue
+                        logger.info(f"{self.client_id}/{self.product_ids}: Processing candle update")
+                        candle = event.get('candle', {})
+                        if candle:
                             await self._process_candle(candle, store_historical=False)
-                        except Exception as e:
-                            logger.error(f"{self.client_id}: Error processing update candle: {e}")
-                            if during_connect:
-                                raise
+                        else:
+                            for candle in event.get('candles', []):
+                                await self._process_candle(candle, store_historical=True)
             
-            # Then check message type
+            # Handle error messages
             elif message_type == "error":
                 error_msg = message.get("message", "Unknown error")
-                logger.error(f"{self.client_id}: Received error from Coinbase: {error_msg}")
-                raise Exception(f"WebSocket error: {error_msg}")
-                
-            elif message_type == "subscriptions":
-                if during_connect:
-                    # Verify the subscribed products match what we requested
-                    subscribed_products = []
-                    for channel in message.get('events', [{}])[0].get('subscriptions', {}).get('candles', []):
-                        subscribed_products.append(channel)
-                    
-                    if not all(product in subscribed_products for product in self.product_ids):
-                        missing = set(self.product_ids) - set(subscribed_products)
-                        raise Exception(f"Not all products were subscribed. Missing: {missing}")
-                    return "subscribed"
-                            
-            elif message_type == "heartbeat":
-                logger.debug(f"{self.client_id}: Received heartbeat")
-                
-            else:
-                # Only log unknown message types if they're not None and not candles
-                if message_type is not None or message.get('channel') != 'candles':
-                    logger.warning(f"{self.client_id}: Received unknown message type: {message_type}")
+                logger.error(f"{self.client_id}/{self.product_ids}: Received error: {error_msg}")
             
-            # Update last message time for health check
+            # Handle heartbeat messages
+            elif message_type == "heartbeat":
+                logger.debug(f"{self.client_id}/{self.product_ids}: Received heartbeat")
+            
+            # Log unknown messages
+            else:
+                logger.debug(f"{self.client_id}/{self.product_ids}: Unknown message: {message}")
+            
+            # Update last message time
             self.last_message_time = time.time()
             
         except Exception as e:
-            if during_connect:
-                raise
-            logger.error(f"{self.client_id}: Error handling message: {e}", exc_info=True)
+            logger.error(f"{self.client_id}/{self.product_ids}: Error handling message: {e}", exc_info=True)
