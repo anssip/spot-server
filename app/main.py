@@ -167,6 +167,8 @@ async def start_websocket_clients():
         
         # Get this shard's products
         shard_products = product_ids[start_idx:end_idx]
+        # push 'BTC-USD' to the front of the list
+        # shard_products.insert(0, 'BTC-USD')
         logger.info(f"Shard {SHARD_INDEX}/{SHARD_COUNT} handling {len(shard_products)} products: {shard_products}")
         
         if shutdown_event.is_set():
@@ -197,59 +199,76 @@ async def start_websocket_clients():
                     )
                     
                     async with async_timeout.timeout(45):
-                        await client.connect()
-                        
-                    # Start listening in a separate task
-                    asyncio.create_task(client.listen())
-                    logger.debug(f"Started websocket client {group_id} for products: {product_group}")
-                    return client
-                    
+                        success, status = await client.connect()
+                        if success:
+                            # Start listening in a background task and store the task
+                            client._listen_task = asyncio.create_task(
+                                client.listen(),
+                                name=f"listen_task_{client.client_id}"
+                            )
+                            logger.info(f"Started websocket client {group_id} for products: {product_group}")
+                            
+                            # Verify the task started
+                            if client._listen_task.done():
+                                exc = client._listen_task.exception()
+                                if exc:
+                                    logger.error(f"Listen task failed immediately for client {group_id}: {exc}")
+                                    continue
+                                
+                            return client
+                        else:
+                            logger.error(f"Failed to connect client {group_id}: {status}")
+                            continue
+                
                 except Exception as e:
                     if shutdown_event.is_set():
-                        logger.info("Shutdown signal received during retry, aborting")
                         return None
                     logger.error(f"Error creating client {group_id} (attempt {attempt + 1}): {e}")
                     if attempt == 2:
-                        logger.error(f"Failed to create client {group_id} after 3 attempts")
+                        logger.error(f"Failed to create client {group_id} after 3 attempts: {str(e)}")
                         return None
                     await asyncio.sleep(5)
             
             return None
 
-        # Start clients in smaller batches with more time between attempts
-        batch_size = 5  # Reduced from 10
+        # Start clients in smaller batches
+        batch_size = 2  # Even smaller batches
         all_clients = []
-        failed_groups = []  # Track failed groups for retry
+        failed_groups = []
         
         for i in range(0, len(product_groups), batch_size):
             if shutdown_event.is_set():
                 break
                 
             batch = product_groups[i:i + batch_size]
+            logger.info(f"Starting batch {i//batch_size} with groups: {batch}")
+            
             client_tasks = [
                 start_client(j + i, group) 
                 for j, group in enumerate(batch)
             ]
             
             try:
-                # Increase timeout for the entire batch
-                async with async_timeout.timeout(90):  # 90 seconds per batch
-                    batch_results = await asyncio.gather(*client_tasks, return_exceptions=True)
-                    
-                    # Process results and track failures
-                    for j, result in enumerate(batch_results):
-                        if isinstance(result, Exception):
-                            logger.error(f"Batch {i//batch_size} client {j} failed: {result}")
-                            failed_groups.append((i + j, batch[j]))
-                        elif result is not None:
-                            all_clients.append(result)
+                batch_results = await asyncio.gather(*client_tasks, return_exceptions=True)
+                
+                # Process results
+                for j, result in enumerate(batch_results):
+                    if isinstance(result, Exception):
+                        logger.error(f"Batch {i//batch_size} client {j} failed with exception: {result}")
+                        failed_groups.append((i + j, batch[j]))
+                    elif result is None:
+                        logger.error(f"Batch {i//batch_size} client {j} failed to connect")
+                        failed_groups.append((i + j, batch[j]))
+                    else:
+                        all_clients.append(result)
+                        logger.info(f"Batch {i//batch_size} client {j} connected successfully")
                 
                 # Longer delay between batches
                 if i + batch_size < len(product_groups):
-                    await asyncio.sleep(5)  # Increased from 2
+                    await asyncio.sleep(15)  # Even longer delay
                     
-            except asyncio.TimeoutError:
-                logger.error(f"Batch {i//batch_size} timed out")
+            except Exception as e:
+                logger.error(f"Batch {i//batch_size} failed: {e}")
                 failed_groups.extend([(i + j, group) for j, group in enumerate(batch)])
         
         # Retry failed groups once more
@@ -282,7 +301,7 @@ if __name__ == "__main__":
     # Add graceful shutdown config to uvicorn
     port = int(os.getenv("PORT", "8080"))
     uvicorn.run(
-        "app.main:app",
+        "app.app",
         host="0.0.0.0",
         port=port,
         log_level="info",
