@@ -181,7 +181,7 @@ async def start_websocket_clients():
             logger.error("No active products found!")
             return []
             
-        product_groups = partition_products(shard_products, size=4)
+        product_groups = partition_products(shard_products, size=8)
         logger.debug(f"Created {len(product_groups)} websocket groups")
         
         async def start_client(group_id: int, product_group: list) -> Optional[CoinbaseWebSocketClient]:

@@ -2,7 +2,7 @@
 
 PROJECT_ID="spotcanvas-prod"
 REGION="europe-west1"
-SHARD_COUNT=10
+SHARD_COUNT=5
 VERSION=$(date +%Y%m%d-%H%M%S)
 
 # Exit on any error
@@ -62,13 +62,24 @@ for i in $(seq 0 $((SHARD_COUNT-1))); do
       - "--set-env-vars"
       - "PROJECT_ID=\${PROJECT_ID},ENVIRONMENT=production,SHARD_COUNT=$SHARD_COUNT,SHARD_INDEX=$i"
       - "--memory"
-      - "8Gi"
+      - "4Gi"
       - "--cpu"
       - "2"
-      - "--execution-environment"
+      - "--concurrency"
+      - "80"
+      - "--cpu-boost"
+      - "--no-cpu-throttling"
+      - "--execution-environment"  
       - "gen2"
-      - "--network"
-      - "default"
+      - "--ingress"
+      - "all"
+      - "--session-affinity"
+      - "--timeout"
+      - "3600s"
+      - "--min-instances"
+      - "1"
+      - "--max-instances"
+      - "1"
 
 EOF
 done
