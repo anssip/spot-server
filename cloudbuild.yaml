@@ -13,9 +13,16 @@ steps:
       - "push"
       - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/spot-server/spot-server:${_VERSION}"
 
+  # Wait before starting deployments
+  - name: "gcr.io/cloud-builders/gcloud"
+    id: wait-before-deployments
+    entrypoint: sleep
+    args: ["60"]  # 60 second delay before deployments start
+
   # Deploy shard 0
   - name: "gcr.io/cloud-builders/gcloud"
     id: deploy-shard-0
+    waitFor: ["wait-before-deployments"]
     args:
       - "run"
       - "deploy"
@@ -30,23 +37,18 @@ steps:
       - "--set-env-vars"
       - "PROJECT_ID=${PROJECT_ID},ENVIRONMENT=production,SHARD_COUNT=10,SHARD_INDEX=0"
       - "--memory"
-      - "512Mi"
-      - "--min-instances"
-      - "1"
-      - "--max-instances"
-      - "10"
-      - "--timeout"
-      - "300s"
-      - "--port"
-      - "8080"
+      - "8Gi"
       - "--cpu"
-      - "1"
-      - "--use-http2"
-      - "--cpu-boost"
+      - "2"
+      - "--execution-environment"
+      - "gen2"
+      - "--network"
+      - "default"
 
   # Deploy shard 1
   - name: "gcr.io/cloud-builders/gcloud"
     id: deploy-shard-1
+    waitFor: ["wait-before-deployments"]
     args:
       - "run"
       - "deploy"
@@ -61,23 +63,18 @@ steps:
       - "--set-env-vars"
       - "PROJECT_ID=${PROJECT_ID},ENVIRONMENT=production,SHARD_COUNT=10,SHARD_INDEX=1"
       - "--memory"
-      - "512Mi"
-      - "--min-instances"
-      - "1"
-      - "--max-instances"
-      - "10"
-      - "--timeout"
-      - "300s"
-      - "--port"
-      - "8080"
+      - "8Gi"
       - "--cpu"
-      - "1"
-      - "--use-http2"
-      - "--cpu-boost"
+      - "2"
+      - "--execution-environment"
+      - "gen2"
+      - "--network"
+      - "default"
 
   # Deploy shard 2
   - name: "gcr.io/cloud-builders/gcloud"
     id: deploy-shard-2
+    waitFor: ["wait-before-deployments"]
     args:
       - "run"
       - "deploy"
@@ -92,23 +89,18 @@ steps:
       - "--set-env-vars"
       - "PROJECT_ID=${PROJECT_ID},ENVIRONMENT=production,SHARD_COUNT=10,SHARD_INDEX=2"
       - "--memory"
-      - "512Mi"
-      - "--min-instances"
-      - "1"
-      - "--max-instances"
-      - "10"
-      - "--timeout"
-      - "300s"
-      - "--port"
-      - "8080"
+      - "8Gi"
       - "--cpu"
-      - "1"
-      - "--use-http2"
-      - "--cpu-boost"
+      - "2"
+      - "--execution-environment"
+      - "gen2"
+      - "--network"
+      - "default"
 
   # Deploy shard 3
   - name: "gcr.io/cloud-builders/gcloud"
     id: deploy-shard-3
+    waitFor: ["wait-before-deployments"]
     args:
       - "run"
       - "deploy"
@@ -123,23 +115,18 @@ steps:
       - "--set-env-vars"
       - "PROJECT_ID=${PROJECT_ID},ENVIRONMENT=production,SHARD_COUNT=10,SHARD_INDEX=3"
       - "--memory"
-      - "512Mi"
-      - "--min-instances"
-      - "1"
-      - "--max-instances"
-      - "10"
-      - "--timeout"
-      - "300s"
-      - "--port"
-      - "8080"
+      - "8Gi"
       - "--cpu"
-      - "1"
-      - "--use-http2"
-      - "--cpu-boost"
+      - "2"
+      - "--execution-environment"
+      - "gen2"
+      - "--network"
+      - "default"
 
   # Deploy shard 4
   - name: "gcr.io/cloud-builders/gcloud"
     id: deploy-shard-4
+    waitFor: ["wait-before-deployments"]
     args:
       - "run"
       - "deploy"
@@ -154,23 +141,18 @@ steps:
       - "--set-env-vars"
       - "PROJECT_ID=${PROJECT_ID},ENVIRONMENT=production,SHARD_COUNT=10,SHARD_INDEX=4"
       - "--memory"
-      - "512Mi"
-      - "--min-instances"
-      - "1"
-      - "--max-instances"
-      - "10"
-      - "--timeout"
-      - "300s"
-      - "--port"
-      - "8080"
+      - "8Gi"
       - "--cpu"
-      - "1"
-      - "--use-http2"
-      - "--cpu-boost"
+      - "2"
+      - "--execution-environment"
+      - "gen2"
+      - "--network"
+      - "default"
 
   # Deploy shard 5
   - name: "gcr.io/cloud-builders/gcloud"
     id: deploy-shard-5
+    waitFor: ["wait-before-deployments"]
     args:
       - "run"
       - "deploy"
@@ -185,23 +167,18 @@ steps:
       - "--set-env-vars"
       - "PROJECT_ID=${PROJECT_ID},ENVIRONMENT=production,SHARD_COUNT=10,SHARD_INDEX=5"
       - "--memory"
-      - "512Mi"
-      - "--min-instances"
-      - "1"
-      - "--max-instances"
-      - "10"
-      - "--timeout"
-      - "300s"
-      - "--port"
-      - "8080"
+      - "8Gi"
       - "--cpu"
-      - "1"
-      - "--use-http2"
-      - "--cpu-boost"
+      - "2"
+      - "--execution-environment"
+      - "gen2"
+      - "--network"
+      - "default"
 
   # Deploy shard 6
   - name: "gcr.io/cloud-builders/gcloud"
     id: deploy-shard-6
+    waitFor: ["wait-before-deployments"]
     args:
       - "run"
       - "deploy"
@@ -216,23 +193,18 @@ steps:
       - "--set-env-vars"
       - "PROJECT_ID=${PROJECT_ID},ENVIRONMENT=production,SHARD_COUNT=10,SHARD_INDEX=6"
       - "--memory"
-      - "512Mi"
-      - "--min-instances"
-      - "1"
-      - "--max-instances"
-      - "10"
-      - "--timeout"
-      - "300s"
-      - "--port"
-      - "8080"
+      - "8Gi"
       - "--cpu"
-      - "1"
-      - "--use-http2"
-      - "--cpu-boost"
+      - "2"
+      - "--execution-environment"
+      - "gen2"
+      - "--network"
+      - "default"
 
   # Deploy shard 7
   - name: "gcr.io/cloud-builders/gcloud"
     id: deploy-shard-7
+    waitFor: ["wait-before-deployments"]
     args:
       - "run"
       - "deploy"
@@ -247,23 +219,18 @@ steps:
       - "--set-env-vars"
       - "PROJECT_ID=${PROJECT_ID},ENVIRONMENT=production,SHARD_COUNT=10,SHARD_INDEX=7"
       - "--memory"
-      - "512Mi"
-      - "--min-instances"
-      - "1"
-      - "--max-instances"
-      - "10"
-      - "--timeout"
-      - "300s"
-      - "--port"
-      - "8080"
+      - "8Gi"
       - "--cpu"
-      - "1"
-      - "--use-http2"
-      - "--cpu-boost"
+      - "2"
+      - "--execution-environment"
+      - "gen2"
+      - "--network"
+      - "default"
 
   # Deploy shard 8
   - name: "gcr.io/cloud-builders/gcloud"
     id: deploy-shard-8
+    waitFor: ["wait-before-deployments"]
     args:
       - "run"
       - "deploy"
@@ -278,23 +245,18 @@ steps:
       - "--set-env-vars"
       - "PROJECT_ID=${PROJECT_ID},ENVIRONMENT=production,SHARD_COUNT=10,SHARD_INDEX=8"
       - "--memory"
-      - "512Mi"
-      - "--min-instances"
-      - "1"
-      - "--max-instances"
-      - "10"
-      - "--timeout"
-      - "300s"
-      - "--port"
-      - "8080"
+      - "8Gi"
       - "--cpu"
-      - "1"
-      - "--use-http2"
-      - "--cpu-boost"
+      - "2"
+      - "--execution-environment"
+      - "gen2"
+      - "--network"
+      - "default"
 
   # Deploy shard 9
   - name: "gcr.io/cloud-builders/gcloud"
     id: deploy-shard-9
+    waitFor: ["wait-before-deployments"]
     args:
       - "run"
       - "deploy"
@@ -309,19 +271,13 @@ steps:
       - "--set-env-vars"
       - "PROJECT_ID=${PROJECT_ID},ENVIRONMENT=production,SHARD_COUNT=10,SHARD_INDEX=9"
       - "--memory"
-      - "512Mi"
-      - "--min-instances"
-      - "1"
-      - "--max-instances"
-      - "10"
-      - "--timeout"
-      - "300s"
-      - "--port"
-      - "8080"
+      - "8Gi"
       - "--cpu"
-      - "1"
-      - "--use-http2"
-      - "--cpu-boost"
+      - "2"
+      - "--execution-environment"
+      - "gen2"
+      - "--network"
+      - "default"
 
 substitutions:
   _REGION: europe-west1

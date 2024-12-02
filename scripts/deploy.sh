@@ -15,6 +15,7 @@ chmod +x scripts/setup-cloud-build.sh
 echo "Deploying using Cloud Build..."
 
 # Generate cloudbuild.yaml dynamically
+echo "Generating cloudbuild.yaml..."
 cat > cloudbuild.yaml.tmp << EOF
 steps:
   # Build the container image
@@ -31,14 +32,22 @@ steps:
       - "push"
       - "\${_REGION}-docker.pkg.dev/\${PROJECT_ID}/spot-server/spot-server:\${_VERSION}"
 
+  # Wait before starting deployments
+  - name: "gcr.io/cloud-builders/gcloud"
+    id: wait-before-deployments
+    entrypoint: sleep
+    args: ["60"]  # 60 second delay before deployments start
+
 EOF
 
 # Add deploy steps for each shard
+echo "Adding shard deployment steps..."
 for i in $(seq 0 $((SHARD_COUNT-1))); do
   cat >> cloudbuild.yaml.tmp << EOF
   # Deploy shard $i
   - name: "gcr.io/cloud-builders/gcloud"
     id: deploy-shard-$i
+    waitFor: ["wait-before-deployments"]
     args:
       - "run"
       - "deploy"
@@ -53,24 +62,19 @@ for i in $(seq 0 $((SHARD_COUNT-1))); do
       - "--set-env-vars"
       - "PROJECT_ID=\${PROJECT_ID},ENVIRONMENT=production,SHARD_COUNT=$SHARD_COUNT,SHARD_INDEX=$i"
       - "--memory"
-      - "512Mi"
-      - "--min-instances"
-      - "1"
-      - "--max-instances"
-      - "10"
-      - "--timeout"
-      - "300s"
-      - "--port"
-      - "8080"
+      - "8Gi"
       - "--cpu"
-      - "1"
-      - "--use-http2"
-      - "--cpu-boost"
+      - "2"
+      - "--execution-environment"
+      - "gen2"
+      - "--network"
+      - "default"
 
 EOF
 done
 
 # Add the rest of the config
+echo "Adding final configuration..."
 cat >> cloudbuild.yaml.tmp << EOF
 substitutions:
   _REGION: $REGION
@@ -82,9 +86,15 @@ timeout: 1800s
 EOF
 
 # Use the generated config
+echo "Moving temporary file to cloudbuild.yaml..."
 mv cloudbuild.yaml.tmp cloudbuild.yaml
 
+# Show the complete generated config
+echo "Generated cloudbuild.yaml contents:"
+cat cloudbuild.yaml
+
 # Submit the build
+echo "Submitting build to Cloud Build..."
 gcloud builds submit --config cloudbuild.yaml \
   --substitutions=_REGION="$REGION",_VERSION="$VERSION" \
   .
