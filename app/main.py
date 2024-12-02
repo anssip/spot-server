@@ -232,7 +232,7 @@ async def start_websocket_clients():
             return None
 
         # Start clients in smaller batches
-        batch_size = 2  # Even smaller batches
+        batch_size = 1
         all_clients = []
         failed_groups = []
         
@@ -263,9 +263,9 @@ async def start_websocket_clients():
                         all_clients.append(result)
                         logger.info(f"Batch {i//batch_size} client {j} connected successfully")
                 
-                # Longer delay between batches
+                # Much longer delay between batches
                 if i + batch_size < len(product_groups):
-                    await asyncio.sleep(15)  # Even longer delay
+                    await asyncio.sleep(10)  # 10 seconds between client starts
                     
             except Exception as e:
                 logger.error(f"Batch {i//batch_size} failed: {e}")
@@ -298,19 +298,20 @@ async def start_websocket_clients():
         raise
 
 if __name__ == "__main__":
-    # Add graceful shutdown config to uvicorn
     port = int(os.getenv("PORT", "8080"))
     uvicorn.run(
-        "app.app",
+        "app.main:app",
         host="0.0.0.0",
         port=port,
         log_level="info",
-        timeout_keep_alive=30,
-        timeout_graceful_shutdown=30,
+        timeout_keep_alive=60,
+        timeout_graceful_shutdown=60,
         loop="auto",
         workers=1,
-        limit_concurrency=100,
+        limit_concurrency=80,
         limit_max_requests=0,
+        backlog=2048,
+        h11_max_incomplete_event_size=16384,
         reload=False,
         access_log=False
     )
