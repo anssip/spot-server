@@ -2,7 +2,7 @@
 
 PROJECT_ID="spotcanvas-prod"
 REGION="europe-west1"
-SHARD_COUNT=5
+SHARD_COUNT=2
 VERSION=$(date +%Y%m%d-%H%M%S)
 
 # Exit on any error
@@ -62,9 +62,7 @@ for i in $(seq 0 $((SHARD_COUNT-1))); do
       - "--set-env-vars"
       - "PROJECT_ID=\${PROJECT_ID},ENVIRONMENT=production,SHARD_COUNT=$SHARD_COUNT,SHARD_INDEX=$i"
       - "--memory"
-      - "1Gi"
-      - "--cpu"
-      - "1"
+      - "512Mi"
       - "--concurrency"
       - "80"
       - "--cpu-boost"
