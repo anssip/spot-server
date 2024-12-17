@@ -16,10 +16,38 @@ To run the server, run `make dev`.
 ./scripts/deploy.sh
 ```
 
+or
+
+```bash
+make deploy
+```
+
 # Firestore data model
 
 ```pre
 firestore/
+├── exchanges/
+│   └── coinbase/  # Document
+│       └── products/
+│           └── BTC-USD/  # Document
+│               ├── base_currency
+│               ├── quote_currency
+│               ├── status
+│               ├── min_size
+│               ├── max_size
+│               └── last_updated
+│
+├── trading_pairs/
+│   └── exchanges/  # Document
+│       └── coinbase/  # Map field
+│           └── BTC-USD/  # Map entry
+│               ├── base_currency
+│               ├── quote_currency
+│               ├── status
+│               ├── min_size
+│               ├── max_size
+│               └── last_updated
+│
 ├── live_candles/
 │   └── BTC-USD/  # Document
 │       ├── timestamp

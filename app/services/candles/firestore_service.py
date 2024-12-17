@@ -7,26 +7,52 @@ from google.oauth2 import service_account
 import json
 from app.services.db.db_helper import DbHelper
 
+from dataclasses import dataclass
+from typing import Literal
+import logging
+
+# Just get the logger, don't configure it
+logger = logging.getLogger(__name__)
+
+@dataclass
+class Product:
+    base_currency: str
+    quote_currency: str
+    last_updated: float
+    source: str
+    status: Literal["online", "delisted"]
+    min_size: str = "0"
+    max_size: str = "0"
+
 
 class FirestoreService:
-    def __init__(self):
-        self.db_helper = DbHelper()
-        self.db = self.db_helper.get_client()
+    _instance = None
+    _db = None
 
-    async def update_live_candle(self, product_id: str, candle_data: list):
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(FirestoreService, cls).__new__(cls)
+            cls._instance.db_helper = DbHelper()
+            cls._instance._db = cls._instance.db_helper.get_client()
+        return cls._instance
+
+    @property
+    def db(self):
+        return self._db
+
+    async def update_live_candle(self, product_path: str, candle_data: list):
         """
-        Updates the live candle document for a specific product
-
-        candle_data format: [timestamp, low, high, open, close, volume]
+        Updates the live candle document for a specific product under its exchange
+        
+        Args:
+            product_path: Format "exchanges/{exchange}/products/{product_id}" 
+                        or "exchanges/{exchange}/products/{product_id}/intervals/{interval}"
+            candle_data: [timestamp, low, high, open, close, volume]
         """
         timestamp, low, high, open_price, close, volume = candle_data
 
-        # Convert timestamp to start of minute to match candle interval
-        candle_start = int(timestamp - (timestamp % 60)
-                           )  # Round to nearest minute
-
-        live_candle_ref = self.db.collection(
-            'live_candles').document(product_id)
+        # Convert timestamp to start of minute
+        candle_start = int(timestamp - (timestamp % 60))
 
         live_candle = {
             'timestamp': candle_start,
@@ -36,31 +62,56 @@ class FirestoreService:
             'close': close,
             'volume': volume,
             'lastUpdate': firestore.SERVER_TIMESTAMP,
-            'productId': product_id
         }
 
+        # Split the path into segments and create document reference
+        path_segments = product_path.split('/')
+        doc_ref = self.db.document('/'.join(path_segments))
+        
         # Use set with merge=True to update fields without overwriting the entire document
-        live_candle_ref.set(live_candle, merge=True)
+        doc_ref.set(live_candle, merge=True)
 
-    async def store_completed_candle(self, product_id: str, candle_data: list):
+    async def get_products(self, exchange: str, status: Literal["online", "delisted"]) -> list[Product]:
         """
-        Stores a completed candle in the historical candles collection
+        Fetches products for a specific exchange with given status
         """
-        timestamp, low, high, open_price, close, volume = candle_data
-        candle_start = int(timestamp - (timestamp % 60))
-
-        # Create a document ID using timestamp and product_id
-        doc_id = f"{product_id}-{candle_start}"
-
-        historical_candle = {
-            'timestamp': candle_start,
-            'open': open_price,
-            'high': high,
-            'low': low,
-            'close': close,
-            'volume': volume,
-            'productId': product_id
-        }
-
-        self.db.collection('historical_candles').document(
-            doc_id).set(historical_candle)
+        try:
+            exchanges_ref = self.db.collection('trading_pairs').document('exchanges')
+            exchanges_doc = exchanges_ref.get()
+            
+            if not exchanges_doc.exists:
+                logger.error("Exchanges document not found")
+                return []
+            
+            data = exchanges_doc.to_dict()
+            products_map = data.get(exchange, {})
+            
+            # Debug logging
+            logger.info(f"Raw products data for {exchange}, size: {len(products_map.keys())}")
+            logger.info(f"Status filter: {status}")
+            
+            products = []
+            for product_id, product in products_map.items():
+                product_status = product.get('status')
+                
+                if product_status == status:
+                    # Get timestamp from Firestore timestamp
+                    timestamp = product['last_updated'].timestamp() if isinstance(product['last_updated'], datetime) else float(product['last_updated'])
+                    
+                    products.append(Product(
+                        base_currency=product['base_currency'],
+                        quote_currency=product['quote_currency'],
+                        status=status,
+                        min_size=str(product.get('min_size', '0')),
+                        max_size=str(product.get('max_size', '0')),
+                        last_updated=timestamp,
+                        source=product_id
+                    ))
+            
+            logger.info(f"Found {len(products)} {status} products for {exchange}")
+                
+            return products
+            
+        except Exception as error:
+            logger.error(f"Error fetching products: {error}", exc_info=True)
+            raise
