@@ -3,34 +3,16 @@ import json
 import logging
 import websockets
 from typing import Callable
-import backoff
-from .models import CandleMessage
 from .firestore_service import FirestoreService
-from collections import defaultdict
-from dataclasses import dataclass
+from .models import Candle
 from datetime import datetime, timezone
-from decimal import Decimal
 from typing import Optional, List, Dict, Tuple
 import time
-import sys
 import async_timeout
-import psutil
-import socket
-import aiohttp
 from enum import Enum
 
 # Just get the logger, don't configure it
 logger = logging.getLogger(__name__)
-
-@dataclass
-class CandleBuffer:
-    open: float
-    high: float
-    low: float
-    close: float
-    volume: float
-    first_timestamp: int
-    last_timestamp: int
 
 class Granularity(str, Enum):
     ONE_MINUTE = "ONE_MINUTE"
@@ -60,66 +42,48 @@ class Granularity(str, Enum):
 class CandleAggregator:
     def __init__(self):
         # Map of (product_id, interval, timestamp) -> CandleBuffer
-        self.candles: Dict[Tuple[str, Granularity, int], CandleBuffer] = {}
+        self.candles: Dict[Tuple[str, Granularity, int], Candle] = {}
     
     def _get_interval_timestamp(self, timestamp: int, granularity: Granularity) -> int:
         """Get the start timestamp for an interval"""
         return timestamp - (timestamp % granularity.seconds)
 
-    def update_candle(self, product_id: str, candle_data: List) -> List[Tuple[Granularity, List, bool]]:
-        """
-        Takes a candle and returns a list of:
-        - Granularity
-        - The current state of the candle for that granularity
-        - Boolean indicating if the candle is completed
-        """
-        timestamp, low, high, open_price, close, volume = candle_data
+    def update_candle(self, product_id: str, candle: Candle) -> List[Tuple[Granularity, Candle, bool]]:
+        """Updates candles for all granularities"""
         updates = []
 
-        # Update each granularity
         for granularity in Granularity:
-            interval_timestamp = self._get_interval_timestamp(timestamp, granularity)
+            interval_timestamp = self._get_interval_timestamp(candle.first_timestamp, granularity)
             key = (product_id, granularity, interval_timestamp)
             
             current = self.candles.get(key)
             if not current:
                 # First candle for this interval
-                current = CandleBuffer(
-                    open=open_price,
-                    high=high,
-                    low=low,
-                    close=close,
-                    volume=volume,
-                    first_timestamp=timestamp,
-                    last_timestamp=timestamp
+                current = Candle(
+                    open=candle.open,
+                    high=candle.high,
+                    low=candle.low,
+                    close=candle.close,
+                    volume=candle.volume,
+                    first_timestamp=candle.first_timestamp,
+                    last_timestamp=candle.last_timestamp
                 )
             else:
                 # Update existing candle
-                current.high = max(current.high, high)
-                current.low = min(current.low, low)
-                current.close = close
-                current.volume += volume
-                current.last_timestamp = timestamp
+                current.high = max(current.high, candle.high)
+                current.low = min(current.low, candle.low)
+                current.close = candle.close
+                current.volume += candle.volume
+                current.last_timestamp = candle.last_timestamp
 
             self.candles[key] = current
 
-            # Create candle data
-            candle_data = [
-                interval_timestamp,
-                current.low,
-                current.high,
-                current.open,
-                current.close,
-                current.volume
-            ]
-
             # Check if interval is complete
-            is_complete = (timestamp - interval_timestamp) >= granularity.seconds
+            is_complete = (candle.last_timestamp - interval_timestamp) >= granularity.seconds
             if is_complete:
-                # Clean up completed candle
                 del self.candles[key]
 
-            updates.append((granularity, candle_data, is_complete))
+            updates.append((granularity, current, is_complete))
 
         return updates
 
@@ -225,24 +189,17 @@ class CoinbaseWebSocketClient:
         """Helper method to process individual candles"""
         try:
             product_id = candle.get('product_id')
-            candle_data = [
-                int(candle['start']),
-                float(candle['low']),
-                float(candle['high']),
-                float(candle['open']),
-                float(candle['close']),
-                float(candle['volume'])
-            ]
+            candle_buffer = Candle.from_coinbase_message(candle)
 
             # Update all intervals
-            updates = self.aggregator.update_candle(product_id, candle_data)
+            updates = self.aggregator.update_candle(product_id, candle_buffer)
             
             for granularity, interval_data, is_complete in updates:
-                # Store under exchanges/coinbase/products/{product_id}/intervals/{granularity}
                 await self.firestore.update_live_candle(
                     f"exchanges/coinbase/products/{product_id}/intervals/{granularity.value}",
-                    interval_data
+                    interval_data.to_list()
                 )
+                # TODO: Send pubsub message if we have active subscribers. This will trigger cancle functions.
                 
         except Exception as e:
             logger.error(f"Error processing candle: {e}", exc_info=True)
