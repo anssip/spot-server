@@ -4,40 +4,14 @@ import logging
 import websockets
 from typing import Callable
 from .firestore_service import FirestoreService
-from .models import Candle
+from .models import Candle, Granularity
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Tuple
 import time
 import async_timeout
-from enum import Enum
 
 # Just get the logger, don't configure it
 logger = logging.getLogger(__name__)
-
-class Granularity(str, Enum):
-    ONE_MINUTE = "ONE_MINUTE"
-    FIVE_MINUTE = "FIVE_MINUTE"
-    FIFTEEN_MINUTE = "FIFTEEN_MINUTE"
-    THIRTY_MINUTE = "THIRTY_MINUTE"
-    ONE_HOUR = "ONE_HOUR"
-    TWO_HOUR = "TWO_HOUR"
-    SIX_HOUR = "SIX_HOUR"
-    ONE_DAY = "ONE_DAY"
-
-    @property
-    def seconds(self) -> int:
-        """Get interval length in seconds"""
-        mapping = {
-            "ONE_MINUTE": 60,
-            "FIVE_MINUTE": 300,
-            "FIFTEEN_MINUTE": 900,
-            "THIRTY_MINUTE": 1800,
-            "ONE_HOUR": 3600,
-            "TWO_HOUR": 7200,
-            "SIX_HOUR": 21600,
-            "ONE_DAY": 86400
-        }
-        return mapping[self.value]
 
 class CandleAggregator:
     def __init__(self):
