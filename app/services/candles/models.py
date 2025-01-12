@@ -1,7 +1,19 @@
 from dataclasses import dataclass
-from typing import List
 from enum import Enum
 
+class Granularity(Enum):
+    ONE_MINUTE = "60"
+    FIVE_MINUTES = "300"
+    FIFTEEN_MINUTES = "900"
+    THIRTY_MINUTES = "1800"
+    ONE_HOUR = "3600"
+    TWO_HOURS = "7200"
+    SIX_HOURS = "21600"
+    ONE_DAY = "86400"
+
+    @property
+    def seconds(self) -> int:
+        return int(self.value)
 
 @dataclass
 class Candle:
@@ -10,57 +22,44 @@ class Candle:
     low: float
     close: float
     volume: float
-    first_timestamp: int
-    last_timestamp: int
+    first_timestamp: int  # Unix timestamp in seconds
+    last_timestamp: int   # Unix timestamp in seconds
 
-    def to_list(self) -> List:
-        """Convert to list format for Firestore storage"""
-        return [
-            self.first_timestamp,
-            self.low,
-            self.high,
-            self.open,
-            self.close,
-            self.volume
-        ]
+    def to_dict(self) -> dict:
+        """Convert candle to dictionary for Firestore storage"""
+        return {
+            "open": self.open,
+            "high": self.high,
+            "low": self.low,
+            "close": self.close,
+            "volume": self.volume,
+            "first_timestamp": self.first_timestamp,
+            "last_timestamp": self.last_timestamp
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'Candle':
+        """Create Candle from dictionary (Firestore format)"""
+        return cls(
+            open=float(data["open"]),
+            high=float(data["high"]),
+            low=float(data["low"]),
+            close=float(data["close"]),
+            volume=float(data["volume"]),
+            first_timestamp=int(data["first_timestamp"]),
+            last_timestamp=int(data["last_timestamp"])
+        )
 
     @classmethod
     def from_coinbase_message(cls, candle: dict) -> 'Candle':
-        """Create Candle from Coinbase WebSocket message"""
-        timestamp = int(candle['start'])
+        """Create Candle from Coinbase API response"""
+        timestamp = int(candle["start"])
         return cls(
-            open=float(candle['open']),
-            high=float(candle['high']),
-            low=float(candle['low']),
-            close=float(candle['close']),
-            volume=float(candle['volume']),
+            open=float(candle["open"]),
+            high=float(candle["high"]),
+            low=float(candle["low"]),
+            close=float(candle["close"]),
+            volume=float(candle["volume"]),
             first_timestamp=timestamp,
             last_timestamp=timestamp
         )
-
-class Granularity(str, Enum):
-    ONE_MINUTE = "ONE_MINUTE"
-    FIVE_MINUTE = "FIVE_MINUTE"
-    FIFTEEN_MINUTE = "FIFTEEN_MINUTE"
-    THIRTY_MINUTE = "THIRTY_MINUTE"
-    ONE_HOUR = "ONE_HOUR"
-    TWO_HOUR = "TWO_HOUR"
-    SIX_HOUR = "SIX_HOUR"
-    ONE_DAY = "ONE_DAY"
-
-    @property
-    def seconds(self) -> int:
-        """Get interval length in seconds"""
-        mapping = {
-            "ONE_MINUTE": 60,
-            "FIVE_MINUTE": 300,
-            "FIFTEEN_MINUTE": 900,
-            "THIRTY_MINUTE": 1800,
-            "ONE_HOUR": 3600,
-            "TWO_HOUR": 7200,
-            "SIX_HOUR": 21600,
-            "ONE_DAY": 86400
-        }
-        return mapping[self.value]
-
-__all__ = ['Candle', 'Granularity']
