@@ -1,60 +1,26 @@
-import time
 from datetime import datetime, timedelta
-from typing import Dict, Optional
-import hmac
-import hashlib
-import base64
-import json
-import aiohttp
-import asyncio
+from typing import Dict, Optional, List
+from coinbase.rest import RESTClient
 from .models import Candle, Granularity
 
 class CoinbasePriceDataService:
     MAX_CANDLES_PER_REQUEST = 300
 
-    def __init__(self, api_key: str, api_secret: str):
+    def __init__(self, api_key: str, api_secret: str, client: Optional[RESTClient] = None):
         self.api_key = api_key.strip()
         self.api_secret = api_secret.strip()
-        self.base_url = "https://api.coinbase.com/api/v3/brokerage"
+        self.client = client or RESTClient(api_key=api_key, api_secret=api_secret)
 
-    def _generate_signature(self, timestamp: str, method: str, request_path: str, body: str = "") -> str:
-        message = timestamp + method + request_path + body
-        signature = hmac.new(
-            self.api_secret.encode('utf-8'),
-            message.encode('utf-8'),
-            hashlib.sha256
-        )
-        return base64.b64encode(signature.digest()).decode('utf-8')
-
-    async def _fetch_candle_page(self, symbol: str, granularity: Granularity, start: datetime, end: datetime) -> Dict[int, Candle]:
+    def _fetch_candle_page(self, symbol: str, granularity: Granularity, start: datetime, end: datetime) -> Dict[int, Candle]:
         """Fetch a single page of candles"""
-        endpoint = f"/products/{symbol}/candles"
-        params = {
-            "granularity": granularity.value,
-            "start": str(int(start.timestamp())),
-            "end": str(int(end.timestamp()))
-        }
-
-        timestamp = str(int(time.time()))
-        signature = self._generate_signature(timestamp, "GET", endpoint)
-        headers = {
-            "CB-ACCESS-KEY": self.api_key,
-            "CB-ACCESS-SIGN": signature,
-            "CB-ACCESS-TIMESTAMP": timestamp,
-        }
-
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                f"{self.base_url}{endpoint}",
-                params=params,
-                headers=headers
-            ) as response:
-                if response.status != 200:
-                    error_data = await response.json()
-                    raise Exception(f"Coinbase API error: {error_data}")
-                
-                data = await response.json()
-                return self._transform_data(data["candles"], granularity)
+        response = self.client.get_candles(
+            product_id=symbol,
+            granularity=granularity.name,
+            start=str(int(start.timestamp())),
+            end=str(int(end.timestamp()))
+        )
+        
+        return self._transform_data(response["candles"], granularity)
 
     async def fetch_candles(
         self, 
@@ -70,13 +36,13 @@ class CoinbasePriceDataService:
             start = end - timedelta(days=1)
 
         # Calculate time delta for one candle based on granularity
-        seconds_per_candle = int(granularity.seconds)
+        seconds_per_candle = granularity.seconds  # Use the seconds property
         total_seconds = int((end - start).total_seconds())
         total_candles = total_seconds // seconds_per_candle
 
         if total_candles <= self.MAX_CANDLES_PER_REQUEST:
             # Single request is sufficient
-            return await self._fetch_candle_page(symbol, granularity, start, end)
+            return self._fetch_candle_page(symbol, granularity, start, end)
 
         # Multiple requests needed
         all_candles = {}
@@ -90,7 +56,7 @@ class CoinbasePriceDataService:
             )
 
             try:
-                batch_candles = await self._fetch_candle_page(
+                batch_candles = self._fetch_candle_page(
                     symbol, 
                     granularity,
                     current_start,
@@ -101,18 +67,27 @@ class CoinbasePriceDataService:
                 # Move to next batch
                 current_start = batch_end
                 
-                # Small delay between requests
-                await asyncio.sleep(0.2)
-                
             except Exception as e:
                 raise Exception(f"Error fetching candles batch {current_start} - {batch_end}: {str(e)}")
 
         return all_candles
 
-    def _transform_data(self, candles: list, granularity: Granularity) -> Dict[int, Candle]:
-        """Transform Coinbase candle data to our Candle model"""
+    def _transform_data(self, candles: List[dict], granularity: Granularity) -> Dict[int, Candle]:
+        """Transform Coinbase candle data to our Candle model
+        
+        Coinbase Advanced Trade API returns candles in this format:
+        {
+            "start": "1736708400",  # Unix timestamp in seconds
+            "low": "40000.0",
+            "high": "41000.0",
+            "open": "40500.0",
+            "close": "40800.0",
+            "volume": "100.0"
+        }
+        """
         result = {}
         for candle_data in candles:
+            # Convert string timestamp to int
             timestamp = int(candle_data["start"])
             candle = Candle(
                 open=float(candle_data["open"]),
