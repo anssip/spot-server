@@ -25,3 +25,6 @@ firestore-rules:
 
 firestore-indexes:
 	firebase deploy --only firestore:indexes --project spotcanvas-prod
+
+ingest:
+	python app/ingest.py

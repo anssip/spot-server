@@ -95,8 +95,8 @@ class CoinbasePriceDataService:
                 low=float(candle_data["low"]),
                 close=float(candle_data["close"]),
                 volume=float(candle_data["volume"]),
-                first_timestamp=timestamp,
-                last_timestamp=timestamp
+                first_timestamp=timestamp * 1000,
+                last_timestamp=timestamp * 1000
             )
             result[timestamp * 1000] = candle
         return result 
