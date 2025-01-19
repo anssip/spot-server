@@ -2,6 +2,19 @@
 
 This is the server for the Spot API.
 
+## TODO
+
+Indicators to implement:
+
+- [ ] Make it insert history numbers continuously
+- [ ] MA 50&200
+- [ ] RSI 14
+- [ ] MACD 12, 26, 9
+- [ ] Stochastic 14, 3, 3
+- [ ] ATR 14
+- [ ] Bollinger Bands 20, 2
+- [ ]
+
 ## Installation
 
 To install the dependencies, run `make install`.

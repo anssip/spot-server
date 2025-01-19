@@ -22,8 +22,8 @@ class Candle:
     low: float
     close: float
     volume: float
-    first_timestamp: int  # Unix timestamp in seconds
-    last_timestamp: int   # Unix timestamp in seconds
+    first_timestamp: int
+    last_timestamp: int
 
     def to_dict(self) -> dict:
         """Convert candle to dictionary for Firestore storage"""
