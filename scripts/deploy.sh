@@ -62,7 +62,7 @@ for i in $(seq 0 $((SHARD_COUNT-1))); do
       - "--set-env-vars"
       - "PROJECT_ID=\${PROJECT_ID},ENVIRONMENT=production,SHARD_COUNT=$SHARD_COUNT,SHARD_INDEX=$i"
       - "--memory"
-      - "256Mi"
+      - "512Mi"
       - "--concurrency"
       - "80"
       - "--cpu-boost"
@@ -72,7 +72,7 @@ for i in $(seq 0 $((SHARD_COUNT-1))); do
       - "--timeout"
       - "3600s"
       - "--min-instances"
-      - "0"
+      - "1"
       - "--max-instances"
       - "1"
 

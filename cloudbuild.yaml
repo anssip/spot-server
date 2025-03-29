@@ -37,7 +37,7 @@ steps:
       - "--set-env-vars"
       - "PROJECT_ID=${PROJECT_ID},ENVIRONMENT=production,SHARD_COUNT=1,SHARD_INDEX=0"
       - "--memory"
-      - "256Mi"
+      - "512Mi"
       - "--concurrency"
       - "80"
       - "--cpu-boost"
@@ -47,7 +47,7 @@ steps:
       - "--timeout"
       - "3600s"
       - "--min-instances"
-      - "0"
+      - "1"
       - "--max-instances"
       - "1"
 
