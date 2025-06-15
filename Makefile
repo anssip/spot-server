@@ -18,10 +18,4 @@ lint:
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -r {} +
-	find . -type f -name "*.pyc" -delete 
-
-firestore-rules:
-	firebase deploy --only firestore:rules --project spotcanvas-prod
-
-firestore-indexes:
-	firebase deploy --only firestore:indexes --project spotcanvas-prod
+	find . -type f -name "*.pyc" -delete
