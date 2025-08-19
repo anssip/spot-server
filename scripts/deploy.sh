@@ -2,7 +2,7 @@
 
 PROJECT_ID="spotcanvas-prod"
 REGION="europe-west1"
-SHARD_COUNT=1
+SHARD_COUNT=5
 VERSION=$(date +%Y%m%d-%H%M%S)
 
 # Exit on any error
@@ -14,13 +14,13 @@ chmod +x scripts/setup-cloud-build.sh
 
 echo "Deploying using Cloud Build..."
 
-# Generate cloudbuild.yaml dynamically
+# Generate cloudbuild.yaml dynamicallyc
 echo "Generating cloudbuild.yaml..."
 cat > cloudbuild.yaml.tmp << EOF
 steps:
   # Build the container image
   - name: "gcr.io/cloud-builders/docker"
-    args: 
+    args:
       - "build"
       - "-t"
       - "\${_REGION}-docker.pkg.dev/\${PROJECT_ID}/spot-server/spot-server:\${_VERSION}"
@@ -28,7 +28,7 @@ steps:
 
   # Push the container image to Artifact Registry
   - name: "gcr.io/cloud-builders/docker"
-    args: 
+    args:
       - "push"
       - "\${_REGION}-docker.pkg.dev/\${PROJECT_ID}/spot-server/spot-server:\${_VERSION}"
 
@@ -66,6 +66,9 @@ for i in $(seq 0 $((SHARD_COUNT-1))); do
       - "--concurrency"
       - "80"
       - "--cpu-boost"
+      - "--no-cpu-throttling"
+      - "--execution-environment"
+      - "gen2"
       - "--ingress"
       - "all"
       - "--session-affinity"
@@ -115,4 +118,4 @@ for i in $(seq 0 $((SHARD_COUNT-1))); do
     || true
 done
 
-echo "Deployment complete!" 
+echo "Deployment complete!"
