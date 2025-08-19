@@ -54,3 +54,4 @@ backoff==2.2.1
 async-timeout==4.0.3
 psutil==5.9.7
 aiohttp==3.9.1
+coinbase-advanced-py==1.8.2
