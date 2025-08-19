@@ -1,6 +1,9 @@
 # Spot Server
 
-This is the server for the Spot API.
+This is the server for the Spot API. It provides to ways to fetch data:
+
+1. An endpoint to fetch candles
+2. Stores live price info to Firestore so that clients can subscribe to live updates
 
 ## TODO
 
@@ -82,18 +85,4 @@ firestore/
     │   ├── volume
     │   └── productId
     └── ...
-```
-
-## Firestore rules and indexes
-
-To deploy the firestore rules from `firestore.rules` file, run:
-
-```bash
-make firestore-rules
-```
-
-To deploy the firestore indexes from `firestore.indexes.json` file, run:
-
-```bash
-make firestore-indexes
 ```

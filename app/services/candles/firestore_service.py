@@ -74,6 +74,7 @@ class FirestoreService:
     async def get_products(self, exchange: str, status: Literal["online", "delisted"]) -> list[Product]:
         """
         Fetches products for a specific exchange with given status
+        Only returns specific trading pairs: BTC-USD, ETH-USD, ADA-USD, DOGE-USD, SOL-USD
         """
         try:
             exchanges_ref = self.db.collection('trading_pairs').document('exchanges')
@@ -90,8 +91,15 @@ class FirestoreService:
             logger.info(f"Raw products data for {exchange}, size: {len(products_map.keys())}")
             logger.info(f"Status filter: {status}")
             
+            # Only get these specific trading pairs
+            allowed_pairs = ["BTC-USD", "ETH-USD", "ADA-USD", "DOGE-USD", "SOL-USD"]
+            
             products = []
             for product_id, product in products_map.items():
+                # Skip if not in allowed pairs
+                if product_id not in allowed_pairs:
+                    continue
+                    
                 product_status = product.get('status')
                 
                 if product_status == status:
@@ -108,7 +116,7 @@ class FirestoreService:
                         source=product_id
                     ))
             
-            logger.info(f"Found {len(products)} {status} products for {exchange}")
+            logger.info(f"Found {len(products)} filtered {status} products for {exchange} (limited to: {', '.join(allowed_pairs)})")
                 
             return products
             

@@ -2,7 +2,7 @@
 
 PROJECT_ID="spotcanvas-prod"
 REGION="europe-west1"
-SHARD_COUNT=2
+SHARD_COUNT=1
 VERSION=$(date +%Y%m%d-%H%M%S)
 
 # Exit on any error
@@ -66,9 +66,6 @@ for i in $(seq 0 $((SHARD_COUNT-1))); do
       - "--concurrency"
       - "80"
       - "--cpu-boost"
-      - "--no-cpu-throttling"
-      - "--execution-environment"  
-      - "gen2"
       - "--ingress"
       - "all"
       - "--session-affinity"
