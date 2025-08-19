@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum
 
+
 class Granularity(Enum):
     ONE_MINUTE = "60"
     FIVE_MINUTES = "300"
@@ -14,6 +15,7 @@ class Granularity(Enum):
     @property
     def seconds(self) -> int:
         return int(self.value)
+
 
 @dataclass
 class Candle:
@@ -36,6 +38,19 @@ class Candle:
             "first_timestamp": self.first_timestamp,
             "last_timestamp": self.last_timestamp
         }
+
+    def to_list(self) -> list:
+        """Convert candle to list format for Firestore live candle updates
+        Returns: [timestamp, low, high, open, close, volume]
+        """
+        return [
+            self.last_timestamp,
+            self.low,
+            self.high,
+            self.open,
+            self.close,
+            self.volume
+        ]
 
     @classmethod
     def from_dict(cls, data: dict) -> 'Candle':
