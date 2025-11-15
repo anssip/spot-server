@@ -2,7 +2,7 @@
 
 PROJECT_ID="spotcanvas-prod"
 REGION="europe-west1"
-SHARD_COUNT=3
+SHARD_COUNT=1
 VERSION=$(date +%Y%m%d-%H%M%S)
 
 # Exit on any error

@@ -51,29 +51,30 @@ class FirestoreService:
         candle_start = int(timestamp - (timestamp % 60))
 
         live_candle = {
-            'timestamp': candle_start,
-            'open': open_price,
-            'high': high,
-            'low': low,
-            'close': close,
-            'volume': volume,
-            'lastUpdate': firestore.SERVER_TIMESTAMP,
+            "timestamp": candle_start,
+            "open": open_price,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": volume,
+            "lastUpdate": firestore.SERVER_TIMESTAMP,
         }
 
         # Split the path into segments and create document reference
-        path_segments = product_path.split('/')
-        doc_ref = self.db.document('/'.join(path_segments))
+        path_segments = product_path.split("/")
+        doc_ref = self.db.document("/".join(path_segments))
 
         # Use set with merge=True to update fields without overwriting the entire document
         doc_ref.set(live_candle, merge=True)
 
-    async def get_products(self, exchange: str, status: Literal["online", "delisted"]) -> list[Product]:
+    async def get_products(
+        self, exchange: str, status: Literal["online", "delisted"]
+    ) -> list[Product]:
         """
         Fetches products for a specific exchange with given status
         """
         try:
-            exchanges_ref = self.db.collection(
-                'trading_pairs').document('exchanges')
+            exchanges_ref = self.db.collection("trading_pairs").document("exchanges")
             exchanges_doc = exchanges_ref.get()
 
             if not exchanges_doc.exists:
@@ -85,32 +86,44 @@ class FirestoreService:
 
             # Debug logging
             logger.info(
-                f"Raw products data for {exchange}, size: {len(products_map.keys())}")
+                f"Raw products data for {exchange}, size: {len(products_map.keys())}"
+            )
             logger.info(f"Status filter: {status}")
+
+            # Only get these specific trading pairs
+            allowed_pairs = ["BTC-USD", "ETH-USD", "ADA-USD", "DOGE-USD", "SOL-USD"]
 
             products = []
             for product_id, product in products_map.items():
                 # Skip if not in allowed pairs
+                if product_id not in allowed_pairs:
+                    continue
 
-                product_status = product.get('status')
+                product_status = product.get("status")
 
                 if product_status == status:
                     # Get timestamp from Firestore timestamp
-                    timestamp = product['last_updated'].timestamp() if isinstance(
-                        product['last_updated'], datetime) else float(product['last_updated'])
+                    timestamp = (
+                        product["last_updated"].timestamp()
+                        if isinstance(product["last_updated"], datetime)
+                        else float(product["last_updated"])
+                    )
 
-                    products.append(Product(
-                        base_currency=product['base_currency'],
-                        quote_currency=product['quote_currency'],
-                        status=status,
-                        min_size=str(product.get('min_size', '0')),
-                        max_size=str(product.get('max_size', '0')),
-                        last_updated=timestamp,
-                        source=product_id
-                    ))
+                    products.append(
+                        Product(
+                            base_currency=product["base_currency"],
+                            quote_currency=product["quote_currency"],
+                            status=status,
+                            min_size=str(product.get("min_size", "0")),
+                            max_size=str(product.get("max_size", "0")),
+                            last_updated=timestamp,
+                            source=product_id,
+                        )
+                    )
 
             logger.info(
-                f"Found {len(products)} filtered {status} products for {exchange}")
+                f"Found {len(products)} filtered {status} products for {exchange}"
+            )
 
             return products
 
