@@ -1,88 +1,90 @@
 # Spot Server
 
-This is the server for the Spot API. It provides to ways to fetch data:
+Real-time cryptocurrency price tracking service that streams live candle data from Coinbase and stores it in Google Cloud Firestore for client subscriptions.
 
-1. An endpoint to fetch candles
-2. Stores live price info to Firestore so that clients can subscribe to live updates
+## Features
 
-## TODO
+- **Real-time WebSocket streaming** from Coinbase Advanced Trade API
+- **Multi-timeframe aggregation** (1m, 5m, 15m, 30m, 1h, 2h, 6h, 1d)
+- **Cloud-native deployment** on Google Cloud Run with horizontal scaling
+- **Firestore integration** for real-time client subscriptions
+- **High availability** with health monitoring and automatic reconnection
 
-Indicators to implement:
+## Quick Start
 
-- [ ] Make it insert history numbers continuously
-- [ ] MA 50&200
-- [ ] RSI 14
-- [ ] MACD 12, 26, 9
-- [ ] Stochastic 14, 3, 3
-- [ ] ATR 14
-- [ ] Bollinger Bands 20, 2
-- [ ]
+### Prerequisites
 
-## Installation
+- Python 3.9+
+- Google Cloud account with Firestore enabled
+- Coinbase Advanced Trade API credentials
 
-To install the dependencies, run `make install`.
+### Installation
 
-## Development
+```bash
+# Install dependencies
+make install
 
-To run the server, run `make dev`.
+# Set up environment variables
+cp .env.example .env
+# Edit .env with your credentials
+```
+
+### Development
+
+```bash
+# Run development server
+make dev
+
+# Run tests
+make test
+
+# Code formatting and linting
+make lint
+```
 
 ## Deployment
+
+Deploy to Google Cloud Run:
 
 ```bash
 ./scripts/deploy.sh
 ```
 
-or
+The deployment script builds a Docker image and deploys it to Cloud Run with automatic scaling and health monitoring.
 
-```bash
-make deploy
-```
+## Architecture
 
-# Firestore data model
+Spot Server uses a sharded architecture to handle multiple trading pairs efficiently:
 
-```pre
-firestore/
-├── exchanges/
-│   └── coinbase/  # Document
-│       └── products/
-│           └── BTC-USD/  # Document
-│               ├── base_currency
-│               ├── quote_currency
-│               ├── status
-│               ├── min_size
-│               ├── max_size
-│               └── last_updated
-│
-├── trading_pairs/
-│   └── exchanges/  # Document
-│       └── coinbase/  # Map field
-│           └── BTC-USD/  # Map entry
-│               ├── base_currency
-│               ├── quote_currency
-│               ├── status
-│               ├── min_size
-│               ├── max_size
-│               └── last_updated
-│
-├── live_candles/
-│   └── BTC-USD/  # Document
-│       ├── timestamp
-│       ├── open
-│       ├── high
-│       ├── low
-│       ├── close
-│       ├── volume
-│       ├── lastUpdate
-│       └── productId
-│
-└── historical_candles/
-    ├── BTC-USD-1234567890/  # Document (productId-timestamp)
-    │   ├── timestamp
-    │   ├── open
-    │   ├── high
-    │   ├── low
-    │   ├── close
-    │   ├── volume
-    │   └── productId
-    └── ...
-```
+- **WebSocket Layer**: Manages persistent connections to Coinbase, partitioned across multiple clients
+- **Aggregation Layer**: Computes candles for all timeframes from 1-minute base data
+- **Storage Layer**: Firestore for real-time updates and historical data
+- **API Layer**: FastAPI with async support and health monitoring
+
+For detailed architecture documentation, see [CLAUDE.md](CLAUDE.md).
+
+## Environment Variables
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `COINBASE_API_KEY` | Coinbase API key | Yes |
+| `COINBASE_PRIVATE_KEY` | Coinbase API secret | Yes |
+| `PROJECT_ID` | Google Cloud project ID | Production only |
+| `SHARD_COUNT` | Number of server shards | No (default: 10) |
+| `SHARD_INDEX` | This instance's shard index | No (default: 0) |
+
+## API Endpoints
+
+- `GET /health` - Health check endpoint for monitoring
+
+## Related Projects
+
+This library is part of the Spot Canvas "ecosystem":
+
+- [sc-app – Spot Canvas website and charts application with AI Assistend technical analysis](https://github.com/anssipiirainen/sc-app)
+- [rc-charts – The charting library this app uses](https://github.com/anssipiirainen/sc-app)
+- [market-evaluators – Indicators backend for Spot Canvas and this library](https://github.com/anssipiirainen/market-evaluators)
+
+## License
+
+MIT
