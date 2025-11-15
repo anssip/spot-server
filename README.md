@@ -81,9 +81,9 @@ For detailed architecture documentation, see [CLAUDE.md](CLAUDE.md).
 
 This library is part of the Spot Canvas "ecosystem":
 
-- [sc-app – Spot Canvas website and charts application with AI Assistend technical analysis](https://github.com/anssipiirainen/sc-app)
-- [rc-charts – The charting library this app uses](https://github.com/anssipiirainen/sc-app)
-- [market-evaluators – Indicators backend for Spot Canvas and this library](https://github.com/anssipiirainen/market-evaluators)
+- [sc-app – Spot Canvas website and charts application with AI Assistend technical analysis](https://github.com/anssip/sc-app)
+- [rc-charts – The charting library this app uses](https://github.com/anssip/rs-charts)
+- [market-evaluators – Indicators backend for Spot Canvas and this library](https://github.com/anssip/market-evaluators)
 
 ## License
 
