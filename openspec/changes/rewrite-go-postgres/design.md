@@ -1,4 +1,6 @@
-# Design: Go + PostgreSQL Candle Streaming Service
+# Design: spot-canvas-app Monorepo
+
+Based on the [Northstar template](https://github.com/zangster300/northstar) for Datastar + NATS + Go projects.
 
 ## Architecture Overview
 
@@ -11,7 +13,7 @@
                                              | WSS Connection
                                              v
 +-----------------------------------------------------------------------------------+
-|                              Go Candle Streaming Service                          |
+|                              spot-canvas-app (Go Server)                          |
 |                                                                                   |
 |  +------------------+     +------------------+     +------------------+           |
 |  | WebSocket Client |     | WebSocket Client |     | WebSocket Client |  ...      |
@@ -22,43 +24,53 @@
 |                                    |                                              |
 |                                    v                                              |
 |                        +-----------------------+                                  |
-|                        |   rawCandles channel  |                                  |
-|                        |   (buffered: 1000)    |                                  |
-|                        +-----------+-----------+                                  |
-|                                    |                                              |
-|                                    v                                              |
-|                        +-----------------------+                                  |
 |                        |  Candle Aggregator    |                                  |
 |                        |    (goroutine)        |                                  |
 |                        |  Aggregates 1m -> Xm  |                                  |
 |                        +-----------+-----------+                                  |
 |                                    |                                              |
 |                    +---------------+----------------+                             |
-|                    |                                |                             |
-|                    v                                v                             |
-|       +------------------------+      +------------------------+                  |
-|       |   Batch Writer         |      |   Datastar Hub         |                  |
-|       |   (goroutine)          |      |   (goroutine)          |                  |
-|       |   Flush: 100ms/50 items|      |   SSE broadcast        |                  |
-|       +------------------------+      +------------------------+                  |
-|                    |                                |                             |
+|                    |               |                |                             |
+|                    v               v                v                             |
+|       +----------------+  +----------------+  +----------------+                  |
+|       | PostgreSQL     |  | NATS Publish   |  | NATS KV Update |                  |
+|       | Batch Writer   |  | (subjects)     |  | (live-candles) |                  |
+|       +----------------+  +----------------+  +----------------+                  |
+|                                    |                                              |
+|                                    v                                              |
+|                        +------------------------+                                 |
+|                        |  Embedded NATS Server  |                                 |
+|                        |  - Pub/Sub messaging   |                                 |
+|                        |  - KV: live-candles    |                                 |
+|                        +-----------+------------+                                 |
+|                                    |                                              |
+|                                    v                                              |
+|                        +------------------------+                                 |
+|                        |  SSE Handler           |                                 |
+|                        |  (NATS subscription)   |                                 |
+|                        |  Datastar PatchElements|                                 |
+|                        +------------------------+                                 |
+|                                    |                                              |
 +-----------------------------------------------------------------------------------+
                      |                                |
                      v                                v
           +-------------------+            +-------------------+
           |   Cloud SQL       |            |    Web Clients    |
-          |   PostgreSQL      |            |   (Datastar SSE)  |
-          |   + TimescaleDB   |            +-------------------+
-          +-------------------+
+          |   PostgreSQL      |            |   (Browser)       |
+          |   + TimescaleDB   |            |                   |
+          +-------------------+            | <spot-candle>     |
+                                           | Datastar Rocket   |
+                                           | Canvas/SVG render |
+                                           +-------------------+
 ```
 
-## Go Project Structure
+## Monorepo Structure
 
 ```
-spot-server-go/
+spot-canvas-app/                    # Monorepo root
 ├── cmd/
 │   └── server/
-│       └── main.go                 # Application entry point
+│       └── main.go                 # Application entry point (embeds NATS)
 │
 ├── internal/
 │   ├── config/
@@ -70,7 +82,7 @@ spot-server-go/
 │   │   └── product.go              # Trading pair model
 │   │
 │   ├── coinbase/
-│   │   ├── client.go               # WebSocket client implementation
+│   │   ├── client.go               # WebSocket client (nhooyr.io/websocket)
 │   │   ├── messages.go             # Message types and parsing
 │   │   └── auth.go                 # JWT authentication for Coinbase
 │   │
@@ -78,19 +90,35 @@ spot-server-go/
 │   │   ├── aggregator.go           # Candle aggregation logic
 │   │   └── aggregator_test.go      # Unit tests
 │   │
+│   ├── nats/
+│   │   ├── server.go               # Embedded NATS server setup
+│   │   ├── publisher.go            # Publish candles to subjects
+│   │   └── kv.go                   # KV bucket operations (live-candles)
+│   │
 │   ├── storage/
-│   │   ├── postgres.go             # PostgreSQL repository
+│   │   ├── postgres.go             # PostgreSQL repository (pgx)
 │   │   ├── repository.go           # Repository interface
 │   │   └── batch_writer.go         # Batched write optimization
 │   │
-│   ├── broadcast/
-│   │   ├── hub.go                  # Client subscription hub
-│   │   └── datastar.go             # Datastar SSE handler
+│   ├── handlers/
+│   │   ├── sse.go                  # SSE handler (NATS subscription + Datastar)
+│   │   ├── pages.go                # Page handlers (Templ templates)
+│   │   └── health.go               # Health check endpoint
 │   │
-│   └── api/
-│       ├── server.go               # HTTP server setup
-│       ├── handlers.go             # Health check, REST endpoints
-│       └── middleware.go           # Logging, CORS
+│   └── templates/                  # Templ templates (.templ files)
+│       ├── layout.templ            # Base layout
+│       ├── index.templ             # Home page with Datastar
+│       └── components/
+│           └── candle.templ        # Server-side candle rendering
+│
+├── web/
+│   ├── static/                     # Static assets
+│   │   ├── css/
+│   │   │   └── app.css             # Tailwind input
+│   │   └── js/
+│   │       └── app.js              # Compiled JS (esbuild output)
+│   └── components/
+│       └── spot-candle.ts          # Datastar Rocket web component
 │
 ├── migrations/
 │   ├── 001_initial_schema.up.sql
@@ -100,11 +128,14 @@ spot-server-go/
 │   ├── deploy.sh                   # Cloud Run deployment
 │   └── migrate.sh                  # Database migrations
 │
+├── Taskfile.yaml                   # Task runner (replaces Makefile)
+├── .air.toml                       # Air live reload config
+├── tailwind.config.js              # Tailwind configuration
 ├── Dockerfile
-├── docker-compose.yml              # Local development
+├── docker-compose.yml              # Local PostgreSQL + TimescaleDB
 ├── go.mod
 ├── go.sum
-├── Makefile
+├── CLAUDE.md                       # AI assistant instructions
 └── README.md
 ```
 
@@ -242,7 +273,7 @@ package storage
 
 import (
     "context"
-    "spot-server-go/internal/models"
+    "spot-canvas-app/internal/models"
 )
 
 type CandleRepository interface {
@@ -264,7 +295,7 @@ package coinbase
 
 import (
     "context"
-    "spot-server-go/internal/models"
+    "spot-canvas-app/internal/models"
 )
 
 type CandleHandler func(candle *models.Candle)
@@ -282,7 +313,7 @@ type WebSocketClient interface {
 // internal/aggregator/aggregator.go
 package aggregator
 
-import "spot-server-go/internal/models"
+import "spot-canvas-app/internal/models"
 
 type Aggregator interface {
     Update(candle *models.Candle) []models.CandleUpdate
@@ -290,13 +321,86 @@ type Aggregator interface {
 }
 ```
 
+## NATS Configuration
+
+Embedded NATS server provides pub/sub messaging and KV storage for real-time candle distribution.
+
+### NATS Subjects
+
+```
+candles.{product}.{granularity}
+```
+
+Examples:
+- `candles.BTC-USD.ONE_MINUTE`
+- `candles.ETH-USD.ONE_HOUR`
+- `candles.*.ONE_MINUTE` (wildcard subscription for all products)
+
+### NATS KV Bucket
+
+**Bucket**: `live-candles`
+**Purpose**: Store current candle state for instant SSE initialization
+
+**Key format**: `{product}.{granularity}`
+**Value**: JSON-encoded Candle
+
+```go
+// internal/nats/kv.go
+type CandleKV struct {
+    js  nats.JetStreamContext
+    kv  nats.KeyValue
+}
+
+func (k *CandleKV) Put(candle *models.Candle) error {
+    key := fmt.Sprintf("%s.%s", candle.ProductID, candle.Granularity)
+    data, _ := json.Marshal(candle)
+    _, err := k.kv.Put(key, data)
+    return err
+}
+
+func (k *CandleKV) Get(productID string, granularity models.Granularity) (*models.Candle, error) {
+    key := fmt.Sprintf("%s.%s", productID, granularity)
+    entry, err := k.kv.Get(key)
+    if err != nil {
+        return nil, err
+    }
+    var candle models.Candle
+    json.Unmarshal(entry.Value(), &candle)
+    return &candle, nil
+}
+```
+
+### Embedded NATS Server
+
+```go
+// internal/nats/server.go
+func StartEmbeddedServer() (*server.Server, error) {
+    opts := &server.Options{
+        Host:           "127.0.0.1",
+        Port:           -1,  // Random available port
+        NoLog:          true,
+        NoSigs:         true,
+        JetStream:      true,
+        StoreDir:       "./data/nats",
+    }
+    ns, err := server.NewServer(opts)
+    if err != nil {
+        return nil, err
+    }
+    go ns.Start()
+    if !ns.ReadyForConnections(5 * time.Second) {
+        return nil, errors.New("nats server not ready")
+    }
+    return ns, nil
+}
+```
+
 ## Datastar SSE Integration (PatchElements)
 
 The server uses Datastar's `PatchElements()` to push custom `<spot-candle>` elements directly to the DOM.
-This follows the hypermedia approach where the server drives the frontend by patching HTML elements.
+SSE handlers subscribe to NATS subjects and stream updates to connected clients.
 
-**Client-side note:** The candlestick chart UI will render `<spot-candle>` elements as Datastar Rocket
-web components. The chart implementation is **out of scope** for this service.
+**Client-side**: The `<spot-candle>` Datastar Rocket web component renders candlesticks on canvas/SVG.
 
 ### SSE Event Format
 
@@ -319,56 +423,74 @@ data: elements ></spot-candle>
 ### Go Implementation
 
 ```go
-// internal/broadcast/datastar.go
-package broadcast
+// internal/handlers/sse.go
+package handlers
 
 import (
+    "encoding/json"
     "fmt"
     "net/http"
 
+    "github.com/nats-io/nats.go"
     "github.com/starfederation/datastar-go/datastar"
-    "spot-server-go/internal/models"
+    "spot-canvas-app/internal/models"
 )
 
-type DatastarHandler struct {
-    hub *Hub
+type SSEHandler struct {
+    nc *nats.Conn
+    kv nats.KeyValue
 }
 
-func (h *DatastarHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *SSEHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
     // Parse subscription parameters
-    productIDs := r.URL.Query()["product"]
-    granularities := parseGranularities(r.URL.Query()["granularity"])
+    products := r.URL.Query()["products"]
+    granularities := parseGranularities(r.URL.Query()["granularities"])
 
     // Create Datastar SSE writer
     sse := datastar.NewSSE(w, r)
 
-    // Create client subscription
-    client := &Client{
-        ID:            generateID(),
-        ProductIDs:    productIDs,
-        Granularities: granularities,
-        Send:          make(chan *models.CandleUpdate, 100),
+    // Send initial state from KV bucket
+    for _, product := range products {
+        for _, gran := range granularities {
+            if candle := h.getFromKV(product, gran); candle != nil {
+                sse.MergeFragments(renderCandleElement(candle, false))
+            }
+        }
     }
 
-    h.hub.Register(client)
-    defer h.hub.Unregister(client)
+    // Subscribe to NATS subjects
+    subs := make([]*nats.Subscription, 0)
+    msgChan := make(chan *nats.Msg, 100)
 
-    // Stream updates via Datastar PatchElements
+    for _, product := range products {
+        for _, gran := range granularities {
+            subject := fmt.Sprintf("candles.%s.%s", product, gran)
+            sub, _ := h.nc.ChanSubscribe(subject, msgChan)
+            subs = append(subs, sub)
+        }
+    }
+    defer func() {
+        for _, sub := range subs {
+            sub.Unsubscribe()
+        }
+    }()
+
+    // Stream updates via Datastar MergeFragments
     ctx := r.Context()
     for {
         select {
         case <-ctx.Done():
             return
-        case update := <-client.Send:
-            // Render candle as custom element for Datastar Rocket component
-            sse.PatchElements(renderCandleElement(update))
+        case msg := <-msgChan:
+            var update models.CandleUpdate
+            json.Unmarshal(msg.Data, &update)
+            sse.MergeFragments(renderCandleElement(update.Candle, update.IsComplete))
         }
     }
 }
 
 // renderCandleElement generates a <spot-candle> custom element
-func renderCandleElement(update *models.CandleUpdate) string {
-    c := update.Candle
+func renderCandleElement(c *models.Candle, isComplete bool) string {
     return fmt.Sprintf(
         `<spot-candle id="%s-%s"
             data-product="%s"
@@ -391,7 +513,7 @@ func renderCandleElement(update *models.CandleUpdate) string {
         c.Low,
         c.Close,
         c.Volume,
-        update.IsComplete,
+        isComplete,
     )
 }
 ```
@@ -408,27 +530,32 @@ func main() {
     sigChan := make(chan os.Signal, 1)
     signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-    // Channels
-    rawCandles := make(chan *models.Candle, 1000)
-    aggregatedCandles := make(chan *models.CandleUpdate, 5000)
+    // Start embedded NATS server
+    ns, _ := natsserver.StartEmbeddedServer()
+    defer ns.Shutdown()
+
+    // Connect to embedded NATS
+    nc, _ := nats.Connect(ns.ClientURL())
+    defer nc.Close()
+
+    // Create JetStream context and KV bucket
+    js, _ := nc.JetStream()
+    kv, _ := js.CreateKeyValue(&nats.KeyValueConfig{
+        Bucket: "live-candles",
+    })
 
     // Components
     db := storage.NewPostgresRepository(cfg.DatabaseURL)
-    hub := broadcast.NewHub()
     agg := aggregator.NewMemoryAggregator()
     writer := storage.NewBatchWriter(db, 50, 100*time.Millisecond)
+    publisher := natspkg.NewPublisher(nc, kv)
+
+    // Channels
+    rawCandles := make(chan *models.Candle, 1000)
 
     var wg sync.WaitGroup
 
-    // Start hub
-    wg.Add(1)
-    go func() { defer wg.Done(); hub.Run(ctx) }()
-
-    // Start batch writer
-    wg.Add(1)
-    go func() { defer wg.Done(); writer.Run(ctx, aggregatedCandles) }()
-
-    // Start aggregator
+    // Start aggregator + publisher
     wg.Add(1)
     go func() {
         defer wg.Done()
@@ -438,8 +565,12 @@ func main() {
                 return
             case candle := <-rawCandles:
                 for _, update := range agg.Update(candle) {
-                    aggregatedCandles <- &update
-                    hub.Broadcast(&update)
+                    // Publish to NATS subject
+                    publisher.Publish(&update)
+                    // Update KV bucket
+                    publisher.UpdateKV(update.Candle)
+                    // Write to PostgreSQL (batched)
+                    writer.Add(update.Candle)
                 }
             }
         }
@@ -455,11 +586,11 @@ func main() {
         }(i, group)
     }
 
-    // Start HTTP server
+    // Start HTTP server with NATS connection
     wg.Add(1)
     go func() {
         defer wg.Done()
-        api.StartServer(ctx, cfg.Port, hub, db)
+        handlers.StartServer(ctx, cfg.Port, nc, kv, db)
     }()
 
     // Wait for shutdown
@@ -522,7 +653,7 @@ spec:
       containerConcurrency: 100
       timeoutSeconds: 3600
       containers:
-        - image: gcr.io/PROJECT/spot-server-go:VERSION
+        - image: gcr.io/PROJECT/spot-canvas-app:VERSION
           ports:
             - containerPort: 8080
           resources:
@@ -562,15 +693,92 @@ spec:
 
 ```go
 // go.mod
-module spot-server-go
+module spot-canvas-app
 
 go 1.22
 
 require (
+    // Web & SSE
+    github.com/go-chi/chi/v5 v5.x.x
     github.com/starfederation/datastar-go v0.x.x
+    github.com/a-h/templ v0.x.x
+
+    // WebSocket
+    nhooyr.io/websocket v1.x.x
+
+    // Database
     github.com/jackc/pgx/v5 v5.x.x
-    github.com/gorilla/websocket v1.5.x
+
+    // NATS
+    github.com/nats-io/nats.go v1.x.x
+    github.com/nats-io/nats-server/v2 v2.x.x
+
+    // Utilities
     github.com/caarlos0/env/v11 v11.x.x
     github.com/golang-jwt/jwt/v5 v5.x.x
 )
+```
+
+## Development Dependencies
+
+```json
+// package.json (for frontend tooling)
+{
+  "devDependencies": {
+    "tailwindcss": "^3.x.x",
+    "daisyui": "^4.x.x",
+    "esbuild": "^0.x.x",
+    "typescript": "^5.x.x"
+  }
+}
+```
+
+## Taskfile Configuration
+
+```yaml
+# Taskfile.yaml
+version: '3'
+
+tasks:
+  live:
+    desc: Start development server with live reload
+    deps: [templ, css]
+    cmds:
+      - air
+
+  build:
+    desc: Build production binary
+    deps: [templ, css]
+    cmds:
+      - go build -o bin/server ./cmd/server
+
+  run:
+    desc: Run production server
+    cmds:
+      - ./bin/server
+
+  templ:
+    desc: Generate Templ templates
+    cmds:
+      - templ generate
+
+  css:
+    desc: Build Tailwind CSS
+    cmds:
+      - npx tailwindcss -i ./web/static/css/app.css -o ./web/static/css/output.css
+
+  js:
+    desc: Bundle TypeScript with esbuild
+    cmds:
+      - npx esbuild web/components/*.ts --bundle --outfile=web/static/js/app.js
+
+  migrate:
+    desc: Run database migrations
+    cmds:
+      - ./scripts/migrate.sh up
+
+  test:
+    desc: Run tests
+    cmds:
+      - go test ./...
 ```

@@ -1,24 +1,35 @@
-# Tasks: Rewrite Spot Server in Go with PostgreSQL
+# Tasks: Rewrite Spot Server as spot-canvas-app Monorepo
 
-## Phase 1: Project Setup
+## Phase 1: Project Scaffold (Northstar Stack)
 
-- [ ] 1.1 Create Go project structure (`spot-server-go/`)
-- [ ] 1.2 Initialize go.mod with module name and Go version
-- [ ] 1.3 Create Makefile with dev, build, test, lint targets
-- [ ] 1.4 Create docker-compose.yml for local PostgreSQL + TimescaleDB
-- [ ] 1.5 Create Dockerfile for Go application
-- [ ] 1.6 Set up config package with environment variable loading
+- [ ] 1.1 Create monorepo at `~/Documents/projects/spot-canvas/spot-canvas-app/`
+- [ ] 1.2 Initialize Go module (`go mod init spot-canvas-app`)
+- [ ] 1.3 Create Taskfile.yaml with tasks: `live`, `build`, `run`, `templ`, `css`, `js`
+- [ ] 1.4 Configure Air live reload (`.air.toml`)
+- [ ] 1.5 Set up esbuild for TypeScript bundling (`package.json`)
+- [ ] 1.6 Configure Tailwind CSS + DaisyUI (`tailwind.config.js`)
+- [ ] 1.7 Create base Templ templates (`internal/templates/layout.templ`, `index.templ`)
+- [ ] 1.8 Create docker-compose.yml for local PostgreSQL + TimescaleDB
+- [ ] 1.9 Create Dockerfile (multi-stage build)
+- [ ] 1.10 Set up config package with environment variable loading
+- [ ] 1.11 Create CLAUDE.md with project instructions
+- [ ] 1.12 Set up .gitignore, .env.example
+- [ ] 1.13 Move `openspec/` from spot-server to spot-canvas-app
+- [ ] 1.14 Move `AGENTS.md` to spot-canvas-app root (or openspec/)
 
-## Phase 2: Database Layer
+## Phase 2: NATS + Database Layer
 
-- [ ] 2.1 Create migration 001_initial_schema.up.sql with TimescaleDB setup
-- [ ] 2.2 Create migration 001_initial_schema.down.sql
-- [ ] 2.3 Implement PostgreSQL repository with pgx driver
-- [ ] 2.4 Implement UpsertLiveCandle with INSERT ON CONFLICT UPDATE
-- [ ] 2.5 Implement UpsertLiveCandleBatch for batched writes
-- [ ] 2.6 Implement GetActiveProducts query
-- [ ] 2.7 Implement BatchWriter with flush interval and batch size
-- [ ] 2.8 Write unit tests for repository layer
+- [ ] 2.1 Set up embedded NATS server (`internal/nats/server.go`)
+- [ ] 2.2 Create NATS KV bucket `live-candles` (`internal/nats/kv.go`)
+- [ ] 2.3 Implement NATS publisher for candle subjects (`internal/nats/publisher.go`)
+- [ ] 2.4 Create migration 001_initial_schema.up.sql with TimescaleDB setup
+- [ ] 2.5 Create migration 001_initial_schema.down.sql
+- [ ] 2.6 Implement PostgreSQL repository with pgx driver
+- [ ] 2.7 Implement UpsertLiveCandle with INSERT ON CONFLICT UPDATE
+- [ ] 2.8 Implement UpsertLiveCandleBatch for batched writes
+- [ ] 2.9 Implement GetActiveProducts query
+- [ ] 2.10 Implement BatchWriter with flush interval and batch size
+- [ ] 2.11 Write unit tests for NATS and repository layers
 
 ## Phase 3: Data Models
 
@@ -31,9 +42,9 @@
 ## Phase 4: Coinbase WebSocket Client
 
 - [ ] 4.1 Implement JWT authentication for Coinbase Advanced Trade API
-- [ ] 4.2 Create WebSocket client with gorilla/websocket
+- [ ] 4.2 Create WebSocket client with nhooyr.io/websocket
 - [ ] 4.3 Implement Connect() with timeout and retry logic
-- [ ] 4.4 Implement Subscribe() for candles channel
+- [ ] 4.4 Implement Subscribe() for candles channel (5 products: BTC-USD, ETH-USD, ADA-USD, DOGE-USD, SOL-USD)
 - [ ] 4.5 Implement Listen() with message parsing
 - [ ] 4.6 Implement exponential backoff reconnection
 - [ ] 4.7 Implement graceful Close() with context cancellation
@@ -49,59 +60,70 @@
 - [ ] 5.6 Implement Reset() for connection recovery
 - [ ] 5.7 Write unit tests for aggregation logic
 
-## Phase 6: Datastar SSE Broadcast (PatchElements)
+## Phase 6: Datastar SSE Handler (NATS Subscription)
 
-- [ ] 6.1 Create Hub struct for managing client subscriptions
-- [ ] 6.2 Implement Register() and Unregister() for clients
-- [ ] 6.3 Implement Broadcast() with product/granularity filtering
-- [ ] 6.4 Create Datastar SSE handler using datastar-go
-- [ ] 6.5 Implement subscription parameter parsing (product, granularity)
-- [ ] 6.6 Implement renderCandleElement() to generate `<spot-candle>` custom elements
-- [ ] 6.7 Implement PatchElements() to push candle elements to clients
+- [ ] 6.1 Create SSE handler with NATS subscription (`internal/handlers/sse.go`)
+- [ ] 6.2 Implement subscription parameter parsing (products, granularities)
+- [ ] 6.3 Send initial state from NATS KV bucket on connection
+- [ ] 6.4 Subscribe to NATS subjects based on query params
+- [ ] 6.5 Implement renderCandleElement() to generate `<spot-candle>` custom elements
+- [ ] 6.6 Implement MergeFragments() to push candle elements to clients
+- [ ] 6.7 Handle client disconnection and cleanup NATS subscriptions
 - [ ] 6.8 Write integration tests for SSE streaming with element patching
 
-## Phase 7: HTTP API
+## Phase 7: HTTP Server + Routes
 
-- [ ] 7.1 Create HTTP server with graceful shutdown
-- [ ] 7.2 Implement /health endpoint with connection status
-- [ ] 7.3 Implement /api/v1/stream SSE endpoint (Datastar handler)
-- [ ] 7.4 Implement /api/v1/products REST endpoint
-- [ ] 7.5 Add CORS middleware
-- [ ] 7.6 Add request logging middleware
-- [ ] 7.7 Write API endpoint tests
+- [ ] 7.1 Create HTTP server with chi router and graceful shutdown
+- [ ] 7.2 Implement /health endpoint with NATS and DB connection status
+- [ ] 7.3 Implement /stream SSE endpoint (Datastar handler)
+- [ ] 7.4 Implement / page handler (renders index.templ)
+- [ ] 7.5 Set up static file serving for CSS/JS
+- [ ] 7.6 Add CORS middleware
+- [ ] 7.7 Add request logging middleware
+- [ ] 7.8 Write API endpoint tests
 
-## Phase 8: Application Orchestration
+## Phase 8: spot-candle Web Component
 
-- [ ] 8.1 Implement main.go with component initialization
-- [ ] 8.2 Set up channel pipeline (rawCandles → aggregatedCandles)
-- [ ] 8.3 Implement signal handling (SIGINT, SIGTERM)
-- [ ] 8.4 Implement graceful shutdown with WaitGroup
-- [ ] 8.5 Implement product sharding (SHARD_INDEX, SHARD_COUNT)
-- [ ] 8.6 Implement product partitioning (8 products per WS client)
-- [ ] 8.7 Implement staggered client startup to avoid rate limits
+- [ ] 8.1 Create Datastar Rocket component scaffold (`web/components/spot-candle.ts`)
+- [ ] 8.2 Define component attributes (product, granularity, open, high, low, close, volume, timestamp, complete)
+- [ ] 8.3 Implement canvas rendering for single candlestick
+- [ ] 8.4 Handle attribute changes from Datastar patches
+- [ ] 8.5 Style component with Tailwind classes
+- [ ] 8.6 (Optional) Implement SVG alternative with Datastar morphing
+- [ ] 8.7 Write component tests
 
-## Phase 9: Cloud Infrastructure
+## Phase 9: Application Orchestration
 
-- [ ] 9.1 Create Cloud SQL PostgreSQL instance with TimescaleDB
-- [ ] 9.2 Configure Cloud SQL connection from Cloud Run
-- [ ] 9.3 Store DATABASE_URL in Secret Manager
-- [ ] 9.4 Update deploy.sh for Go build and Cloud SQL
-- [ ] 9.5 Update cloudbuild.yaml for multi-shard deployment
-- [ ] 9.6 Create migrate.sh for running database migrations
+- [ ] 9.1 Implement main.go with embedded NATS server initialization
+- [ ] 9.2 Connect to NATS and create JetStream/KV
+- [ ] 9.3 Set up aggregator → NATS publish → PostgreSQL write pipeline
+- [ ] 9.4 Implement signal handling (SIGINT, SIGTERM)
+- [ ] 9.5 Implement graceful shutdown with WaitGroup
+- [ ] 9.6 Implement product sharding (SHARD_INDEX, SHARD_COUNT)
+- [ ] 9.7 Implement product partitioning (8 products per WS client)
+- [ ] 9.8 Implement staggered client startup to avoid rate limits
 
-## Phase 10: Testing & Validation
+## Phase 10: Cloud Infrastructure
 
-- [ ] 10.1 Run full test suite with coverage
-- [ ] 10.2 Test local development with docker-compose
-- [ ] 10.3 Deploy to staging environment
-- [ ] 10.4 Validate candle data accuracy against Python service
-- [ ] 10.5 Load test with multiple simultaneous SSE clients
-- [ ] 10.6 Verify graceful shutdown behavior
+- [ ] 10.1 Create Cloud SQL PostgreSQL instance with TimescaleDB
+- [ ] 10.2 Configure Cloud SQL connection from Cloud Run (Unix socket)
+- [ ] 10.3 Store DATABASE_URL and COINBASE credentials in Secret Manager
+- [ ] 10.4 Update deploy.sh for Go build and Cloud SQL
+- [ ] 10.5 Update cloudbuild.yaml for multi-shard deployment
+- [ ] 10.6 Create migrate.sh for running database migrations
 
-## Phase 11: Cleanup
+## Phase 11: Testing & Validation
 
-- [ ] 11.1 Archive Python codebase (or delete after validation)
-- [ ] 11.2 Update README.md with Go-specific instructions
-- [ ] 11.3 Update CLAUDE.md with new architecture documentation
-- [ ] 11.4 Remove Firestore-related configuration files
-- [ ] 11.5 Update openspec/project.md with new tech stack
+- [ ] 11.1 Run full test suite with coverage
+- [ ] 11.2 Test local development with docker-compose and `task live`
+- [ ] 11.3 Deploy to staging environment
+- [ ] 11.4 Validate candle data accuracy against Python service
+- [ ] 11.5 Load test with multiple simultaneous SSE clients
+- [ ] 11.6 Verify graceful shutdown behavior
+
+## Phase 12: Cleanup
+
+- [ ] 12.1 Archive Python spot-server (keep until Go version stable)
+- [ ] 12.2 Update README.md with monorepo instructions
+- [ ] 12.3 Remove Firestore-related configuration files
+- [ ] 12.4 Update openspec/project.md with new tech stack
