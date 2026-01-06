@@ -1,5 +1,7 @@
 # Tasks: Rewrite Spot Server as spot-canvas-app Monorepo
 
+> **Scope:** This task list covers Phase 1 (Go Backend). Phase 8 (Datastar frontend) is deferred to a separate proposal.
+
 ## Phase 1: Project Scaffold (Northstar Stack)
 
 - [ ] 1.1 Create monorepo at `~/Documents/projects/spot-canvas/spot-canvas-app/`
@@ -82,15 +84,16 @@
 - [ ] 7.7 Add request logging middleware
 - [ ] 7.8 Write API endpoint tests
 
-## Phase 8: spot-candle Web Component
+## Phase 8: spot-chart Web Component (DEFERRED TO PHASE 2)
 
-- [ ] 8.1 Create Datastar Rocket component scaffold (`web/components/spot-candle.ts`)
-- [ ] 8.2 Define component attributes (product, granularity, open, high, low, close, volume, timestamp, complete)
-- [ ] 8.3 Implement canvas rendering for single candlestick
-- [ ] 8.4 Handle attribute changes from Datastar patches
-- [ ] 8.5 Style component with Tailwind classes
-- [ ] 8.6 (Optional) Implement SVG alternative with Datastar morphing
-- [ ] 8.7 Write component tests
+> **Note:** This phase is deferred to a separate Phase 2 proposal. Phase 1 focuses on the Go backend only.
+
+- [ ] 8.1 Create Datastar Rocket `<spot-chart>` component (`web/components/spot-chart.ts`)
+- [ ] 8.2 Implement canvas-based multi-candle chart rendering
+- [ ] 8.3 Handle SSE chart morphing (server pushes full chart state)
+- [ ] 8.4 Style component with Tailwind classes
+- [ ] 8.5 Replace rs-charts with new Datastar chart
+- [ ] 8.6 Write component tests
 
 ## Phase 9: Application Orchestration
 

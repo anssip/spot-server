@@ -4,6 +4,13 @@
 
 The current Python/Firestore implementation has throughput limitations that prevent scaling to handle more trading pairs efficiently. Go's superior concurrency model (goroutines, channels) and PostgreSQL's relational capabilities with TimescaleDB time-series optimization will significantly improve performance and enable handling more trading pairs per instance.
 
+## Implementation Phases
+
+This proposal covers **Phase 1 (Backend)** only:
+
+- **Phase 1: Go Backend** (this proposal) - Go server with NATS/PostgreSQL, real-time candle ingestion, SSE streaming
+- **Phase 2: Datastar Frontend** (separate proposal) - `<spot-chart>` Datastar Rocket component with SSE chart morphing, replacing rs-charts
+
 ## What Changes
 
 ### Removed
@@ -11,16 +18,20 @@ The current Python/Firestore implementation has throughput limitations that prev
 - **Firestore integration** - Replace document database with PostgreSQL
 - **Firebase dependencies** - Remove firebase-admin, google-cloud-firestore packages
 
-### Added
-- **Monorepo structure** - New `spot-canvas-app/` repo (sibling to `spot-server/`) containing both backend and frontend
+### Added (Phase 1)
+- **Monorepo structure** - New `spot-canvas-app/` repo (sibling to `spot-server/`)
 - **Go implementation** - Complete rewrite using idiomatic Go patterns based on [Northstar template](https://github.com/zangster300/northstar)
 - **NATS messaging** - Embedded NATS server for pub/sub and KV storage (replaces Firestore real-time)
 - **PostgreSQL database** - Cloud SQL with TimescaleDB extension for time-series data
 - **Templ templates** - Type-safe Go templates for server-rendered HTML
 - **Tailwind CSS + DaisyUI** - Styling for hypermedia UI
-- **Datastar SSE with PatchElements** - Real-time `<spot-candle>` element updates
-- **Datastar Rocket web component** - `<spot-candle>` component for candlestick rendering
+- **Datastar SSE** - Real-time candle streaming via Server-Sent Events
 - **Taskfile** - Task runner (replaces Makefile) with live reload via Air + esbuild
+
+### Deferred to Phase 2 (Frontend)
+- **Datastar Rocket `<spot-chart>` component** - Canvas-based chart rendering with SSE morphing
+- **Chart SSE morphing** - Server pushes complete chart state (historical + live candles) via SSE morph
+- **Replace rs-charts** - New hypermedia-based chart replaces current Lit web component library
 
 ### Modified
 - **Deployment scripts** - Update for Go build and Cloud SQL configuration
@@ -41,12 +52,11 @@ The current Python/Firestore implementation has throughput limitations that prev
 | Styling | N/A | Tailwind CSS + DaisyUI |
 | Build | Makefile | Taskfile + Air + esbuild |
 
-### Client Impact
+### Client Impact (Phase 1)
 - **Breaking change**: Clients must migrate from Firestore SDK to SSE API
 - **New endpoint**: `/stream?products=BTC-USD&granularities=ONE_MINUTE`
-- **Data format**: `<spot-candle>` custom elements via Datastar `PatchElements`
-- **Hypermedia approach**: Server renders HTML, patches DOM elements directly
-- **Frontend included**: `<spot-candle>` Datastar Rocket component renders candlesticks on canvas/SVG
+- **Data format**: JSON candle updates via SSE (Phase 2 will add HTML chart morphing)
+- **Existing rs-charts**: Can continue using SSE with adapter (Phase 2 will replace with Datastar chart)
 
 ### Infrastructure Changes
 - **New**: Cloud SQL PostgreSQL instance (europe-west1)
@@ -55,6 +65,7 @@ The current Python/Firestore implementation has throughput limitations that prev
 - **Remove**: Firestore indexes and security rules
 - **Keep**: Cloud Run sharding architecture (SHARD_INDEX, SHARD_COUNT)
 
-### Deferred
-- Historical data ingestion (will add later as separate change)
-- Migration of existing Firestore data to PostgreSQL
+### Deferred to Separate Proposals
+- **Datastar frontend (Phase 2)** - `<spot-chart>` component with SSE chart morphing (no REST API needed - SSE pushes full chart state including historical candles)
+- **Historical data ingestion** - Backfill PostgreSQL from Coinbase REST API
+- **Firestore migration** - One-time migration of existing data to PostgreSQL

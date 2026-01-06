@@ -117,8 +117,8 @@ spot-canvas-app/                    # Monorepo root
 │   │   │   └── app.css             # Tailwind input
 │   │   └── js/
 │   │       └── app.js              # Compiled JS (esbuild output)
-│   └── components/
-│       └── spot-candle.ts          # Datastar Rocket web component
+│   └── components/                 # Phase 2: Datastar Rocket components
+│       └── spot-chart.ts           # (Phase 2) Canvas-based chart with SSE morphing
 │
 ├── migrations/
 │   ├── 001_initial_schema.up.sql
@@ -395,32 +395,39 @@ func StartEmbeddedServer() (*server.Server, error) {
 }
 ```
 
-## Datastar SSE Integration (PatchElements)
+## Datastar SSE Integration
 
-The server uses Datastar's `PatchElements()` to push custom `<spot-candle>` elements directly to the DOM.
+The server uses Datastar's `MergeFragments()` to push candle data via SSE.
 SSE handlers subscribe to NATS subjects and stream updates to connected clients.
 
-**Client-side**: The `<spot-candle>` Datastar Rocket web component renders candlesticks on canvas/SVG.
+**Phase 1 (this proposal)**: SSE streams JSON candle updates for integration with existing clients.
 
-### SSE Event Format
+**Phase 2 (future proposal)**: SSE will morph entire `<spot-chart>` component with full chart state (historical + live candles). Server renders chart HTML, pushes via MergeFragments. No REST API needed for historical data - the chart is fully server-rendered.
+
+### SSE Event Format (Phase 1 - JSON)
 
 ```
-event: datastar-patch-elements
-data: elements <spot-candle id="BTC-USD-ONE_MINUTE"
-data: elements     data-product="BTC-USD"
-data: elements     data-granularity="ONE_MINUTE"
-data: elements     data-timestamp="1704567600"
-data: elements     data-open="42000.5000000000"
-data: elements     data-high="42500.0000000000"
-data: elements     data-low="41800.0000000000"
-data: elements     data-close="42200.0000000000"
-data: elements     data-volume="123.4500000000"
-data: elements     data-complete="false"
-data: elements ></spot-candle>
+event: candle
+data: {"product_id":"BTC-USD","granularity":"ONE_MINUTE","timestamp":1704567600,"open":42000.5,"high":42500.0,"low":41800.0,"close":42200.0,"volume":123.45,"is_complete":false}
 
 ```
 
-### Go Implementation
+### SSE Event Format (Phase 2 - HTML Chart Morphing, Future)
+
+In Phase 2, the server will push complete chart state via Datastar MergeFragments:
+
+```
+event: datastar-merge-fragments
+data: fragments <spot-chart id="chart-BTC-USD-ONE_MINUTE"
+data: fragments     data-product="BTC-USD"
+data: fragments     data-granularity="ONE_MINUTE">
+data: fragments   <!-- Server renders all visible candles (e.g., 100 candles) -->
+data: fragments   <canvas data-candles='[{"t":1704567600,"o":42000.5,"h":42500,"l":41800,"c":42200,"v":123.45},...]'></canvas>
+data: fragments </spot-chart>
+
+```
+
+### Go Implementation (Phase 1 - JSON SSE)
 
 ```go
 // internal/handlers/sse.go
@@ -432,7 +439,6 @@ import (
     "net/http"
 
     "github.com/nats-io/nats.go"
-    "github.com/starfederation/datastar-go/datastar"
     "spot-canvas-app/internal/models"
 )
 
@@ -442,18 +448,26 @@ type SSEHandler struct {
 }
 
 func (h *SSEHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+    // Set SSE headers
+    w.Header().Set("Content-Type", "text/event-stream")
+    w.Header().Set("Cache-Control", "no-cache")
+    w.Header().Set("Connection", "keep-alive")
+
+    flusher, ok := w.(http.Flusher)
+    if !ok {
+        http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+        return
+    }
+
     // Parse subscription parameters
     products := r.URL.Query()["products"]
     granularities := parseGranularities(r.URL.Query()["granularities"])
-
-    // Create Datastar SSE writer
-    sse := datastar.NewSSE(w, r)
 
     // Send initial state from KV bucket
     for _, product := range products {
         for _, gran := range granularities {
             if candle := h.getFromKV(product, gran); candle != nil {
-                sse.MergeFragments(renderCandleElement(candle, false))
+                h.sendCandleEvent(w, flusher, candle, false)
             }
         }
     }
@@ -475,7 +489,7 @@ func (h *SSEHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
         }
     }()
 
-    // Stream updates via Datastar MergeFragments
+    // Stream updates as JSON events
     ctx := r.Context()
     for {
         select {
@@ -484,37 +498,25 @@ func (h *SSEHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
         case msg := <-msgChan:
             var update models.CandleUpdate
             json.Unmarshal(msg.Data, &update)
-            sse.MergeFragments(renderCandleElement(update.Candle, update.IsComplete))
+            h.sendCandleEvent(w, flusher, update.Candle, update.IsComplete)
         }
     }
 }
 
-// renderCandleElement generates a <spot-candle> custom element
-func renderCandleElement(c *models.Candle, isComplete bool) string {
-    return fmt.Sprintf(
-        `<spot-candle id="%s-%s"
-            data-product="%s"
-            data-granularity="%s"
-            data-timestamp="%d"
-            data-open="%.10f"
-            data-high="%.10f"
-            data-low="%.10f"
-            data-close="%.10f"
-            data-volume="%.10f"
-            data-complete="%t"
-        ></spot-candle>`,
-        c.ProductID,
-        c.Granularity.String(),
-        c.ProductID,
-        c.Granularity.String(),
-        c.Timestamp.Unix(),
-        c.Open,
-        c.High,
-        c.Low,
-        c.Close,
-        c.Volume,
-        isComplete,
-    )
+func (h *SSEHandler) sendCandleEvent(w http.ResponseWriter, f http.Flusher, c *models.Candle, isComplete bool) {
+    data, _ := json.Marshal(map[string]interface{}{
+        "product_id":  c.ProductID,
+        "granularity": c.Granularity.String(),
+        "timestamp":   c.Timestamp.Unix(),
+        "open":        c.Open,
+        "high":        c.High,
+        "low":         c.Low,
+        "close":       c.Close,
+        "volume":      c.Volume,
+        "is_complete": isComplete,
+    })
+    fmt.Fprintf(w, "event: candle\ndata: %s\n\n", data)
+    f.Flush()
 }
 ```
 
@@ -610,29 +612,69 @@ type BatchWriter struct {
     flushInterval time.Duration
     buffer        []*models.Candle
     mu            sync.Mutex
+    ctx           context.Context
+    cancel        context.CancelFunc
+    wg            sync.WaitGroup
 }
 
-func (w *BatchWriter) Run(ctx context.Context, input <-chan *models.CandleUpdate) {
+func NewBatchWriter(repo CandleRepository, batchSize int, flushInterval time.Duration) *BatchWriter {
+    ctx, cancel := context.WithCancel(context.Background())
+    w := &BatchWriter{
+        repo:          repo,
+        batchSize:     batchSize,
+        flushInterval: flushInterval,
+        buffer:        make([]*models.Candle, 0, batchSize),
+        ctx:           ctx,
+        cancel:        cancel,
+    }
+    w.wg.Add(1)
+    go w.runFlushLoop()
+    return w
+}
+
+// Add adds a candle to the batch buffer. Flushes automatically when batch is full.
+func (w *BatchWriter) Add(candle *models.Candle) {
+    w.mu.Lock()
+    w.buffer = append(w.buffer, candle)
+    shouldFlush := len(w.buffer) >= w.batchSize
+    w.mu.Unlock()
+    if shouldFlush {
+        w.flush()
+    }
+}
+
+func (w *BatchWriter) runFlushLoop() {
+    defer w.wg.Done()
     ticker := time.NewTicker(w.flushInterval)
     defer ticker.Stop()
 
     for {
         select {
-        case <-ctx.Done():
-            w.flush(ctx)
+        case <-w.ctx.Done():
+            w.flush() // Final flush on shutdown
             return
-        case update := <-input:
-            w.mu.Lock()
-            w.buffer = append(w.buffer, update.Candle)
-            shouldFlush := len(w.buffer) >= w.batchSize
-            w.mu.Unlock()
-            if shouldFlush {
-                w.flush(ctx)
-            }
         case <-ticker.C:
-            w.flush(ctx)
+            w.flush()
         }
     }
+}
+
+func (w *BatchWriter) flush() {
+    w.mu.Lock()
+    if len(w.buffer) == 0 {
+        w.mu.Unlock()
+        return
+    }
+    candles := w.buffer
+    w.buffer = make([]*models.Candle, 0, w.batchSize)
+    w.mu.Unlock()
+
+    w.repo.UpsertLiveCandleBatch(w.ctx, candles)
+}
+
+func (w *BatchWriter) Close() {
+    w.cancel()
+    w.wg.Wait()
 }
 ```
 

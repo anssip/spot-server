@@ -45,20 +45,30 @@ The system SHALL publish candle updates to NATS subjects for real-time distribut
 - **THEN** NATS subscriptions are created for requested products and granularities
 - **AND** initial candle state is sent from KV bucket
 
-### Requirement: Datastar SSE Streaming
+### Requirement: SSE Streaming (Phase 1)
 
-The system SHALL stream candle updates to web clients using Datastar SSE with MergeFragments.
+The system SHALL stream candle updates to web clients using Server-Sent Events.
 
 #### Scenario: SSE connection established
 - **GIVEN** a client requests `/stream?products=BTC-USD&granularities=ONE_MINUTE`
 - **WHEN** the connection is established
-- **THEN** initial candle state is sent as `<spot-candle>` elements
-- **AND** subsequent updates are streamed as Datastar MergeFragments events
+- **THEN** initial candle state is sent as JSON events
+- **AND** subsequent updates are streamed as JSON candle events
 
-#### Scenario: Candle element rendered
+#### Scenario: Candle event format
 - **WHEN** a candle update is received from NATS
-- **THEN** a `<spot-candle>` custom element is rendered with data attributes
-- **AND** the element is sent to the client via SSE
+- **THEN** a JSON object containing product_id, granularity, OHLCV data, and is_complete flag is sent
+- **AND** the event type is "candle"
+
+### Requirement: Chart SSE Morphing (Phase 2 - Deferred)
+
+In Phase 2, the system SHALL stream complete chart state via Datastar MergeFragments.
+
+#### Scenario: Chart morphing (Phase 2)
+- **GIVEN** Phase 2 implementation
+- **WHEN** a client connects for chart data
+- **THEN** the server renders full chart HTML (historical + live candles)
+- **AND** sends it via Datastar MergeFragments for DOM morphing
 
 ### Requirement: PostgreSQL Persistence
 
