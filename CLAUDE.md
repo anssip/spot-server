@@ -194,3 +194,7 @@ firestore/
    - WebSocket clients initialize in background during lifespan
    - Clients start in batches with 10-second delays to avoid rate limits
    - Failed clients are retried once before giving up
+
+## Tasks and issues tracking
+
+Use 'bd' for task tracking
