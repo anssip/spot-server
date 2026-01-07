@@ -10,59 +10,76 @@ Based on the [Northstar template](https://github.com/zangster300/northstar) for 
                                     |  (WebSocket API)  |
                                     +--------+----------+
                                              |
-                                             | WSS Connection
+                                             | 25 WSS Connections (20 products each)
                                              v
 +-----------------------------------------------------------------------------------+
 |                              spot-canvas-app (Go Server)                          |
 |                                                                                   |
-|  +------------------+     +------------------+     +------------------+           |
-|  | WebSocket Client |     | WebSocket Client |     | WebSocket Client |  ...      |
-|  |  (goroutine)     |     |  (goroutine)     |     |  (goroutine)     |           |
-|  +--------+---------+     +--------+---------+     +--------+---------+           |
-|           |                        |                        |                     |
-|           +------------------------+------------------------+                     |
-|                                    |                                              |
-|                                    v                                              |
-|                        +-----------------------+                                  |
-|                        |  Candle Aggregator    |                                  |
-|                        |    (goroutine)        |                                  |
-|                        |  Aggregates 1m -> Xm  |                                  |
-|                        +-----------+-----------+                                  |
-|                                    |                                              |
-|                    +---------------+----------------+                             |
-|                    |               |                |                             |
-|                    v               v                v                             |
-|       +----------------+  +----------------+  +----------------+                  |
-|       | PostgreSQL     |  | NATS Publish   |  | NATS KV Update |                  |
-|       | Batch Writer   |  | (subjects)     |  | (live-candles) |                  |
-|       +----------------+  +----------------+  +----------------+                  |
-|                                    |                                              |
-|                                    v                                              |
-|                        +------------------------+                                 |
-|                        |  Embedded NATS Server  |                                 |
-|                        |  - Pub/Sub messaging   |                                 |
-|                        |  - KV: live-candles    |                                 |
-|                        +-----------+------------+                                 |
-|                                    |                                              |
-|                                    v                                              |
-|                        +------------------------+                                 |
-|                        |  SSE Handler           |                                 |
-|                        |  (NATS subscription)   |                                 |
-|                        |  Datastar PatchElements|                                 |
-|                        +------------------------+                                 |
-|                                    |                                              |
+|  +-----------------------------------------------------------------------------+  |
+|  |                     Connection Manager                                       |  |
+|  |  +---------------+  +---------------+  +---------------+                     |  |
+|  |  | WS Client 1   |  | WS Client 2   |  | WS Client N   |  (20 products each) |  |
+|  |  | buffer: 100   |  | buffer: 100   |  | buffer: 100   |                     |  |
+|  |  +-------+-------+  +-------+-------+  +-------+-------+                     |  |
+|  |          |                  |                  |                             |  |
+|  |          +------------------+------------------+                             |  |
+|  |                             | Raw Candle Channel (buffer: 2000)              |  |
+|  +-----------------------------------------------------------------------------+  |
+|                                |                                                  |
+|                                v                                                  |
+|  +-----------------------------------------------------------------------------+  |
+|  |                     Sharded Aggregator (16 shards)                           |  |
+|  |  +----------+  +----------+  +----------+  +----------+                      |  |
+|  |  | Shard 0  |  | Shard 1  |  | Shard 2  |  | ...      |  FNV-1a hash routing |  |
+|  |  | buf: 256 |  | buf: 256 |  | buf: 256 |  |          |  by product ID       |  |
+|  |  +----+-----+  +----+-----+  +----+-----+  +----------+                      |  |
+|  |       |             |             |                                          |  |
+|  |       +-------------+-------------+                                          |  |
+|  |                     | Update Channel (buffer: 1000)                          |  |
+|  +-----------------------------------------------------------------------------+  |
+|                        |                                                          |
+|        +---------------+---------------+---------------+                          |
+|        |               |               |               |                          |
+|        v               v               v               v                          |
+|  +-----------+  +-------------+  +-----------+  +------------------+              |
+|  | Batch     |  | NATS        |  | NATS KV   |  | Backpressure     |              |
+|  | Writer    |  | Publisher   |  | Updater   |  | Monitor          |              |
+|  | 100/50ms  |  | (immediate) |  | 10ms dupe |  | 80% threshold    |              |
+|  +-----------+  +-------------+  +-----------+  +------------------+              |
+|        |               |               |                                          |
+|        v               v               v                                          |
+|  +-----------+  +------------------------+                                        |
+|  | TimescaleDB|  |  Embedded NATS Server  |                                        |
+|  | PostgreSQL |  |  - Pub/Sub messaging   |                                        |
+|  +-----------+  |  - KV: live-candles    |                                        |
+|                 +-----------+------------+                                        |
+|                             |                                                     |
+|                             v                                                     |
+|                 +------------------------+                                        |
+|                 |  SSE Handler           |                                        |
+|                 |  (NATS subscription)   |                                        |
+|                 |  Target: <100ms e2e    |                                        |
+|                 +------------------------+                                        |
+|                             |                                                     |
 +-----------------------------------------------------------------------------------+
-                     |                                |
-                     v                                v
-          +-------------------+            +-------------------+
-          |   Cloud SQL       |            |    Web Clients    |
-          |   PostgreSQL      |            |   (Browser)       |
-          |   + TimescaleDB   |            |                   |
-          +-------------------+            | <spot-candle>     |
-                                           | Datastar Rocket   |
-                                           | Canvas/SVG render |
-                                           +-------------------+
+                              v
+                   +-------------------+
+                   |    Web Clients    |
+                   |   (Browser)       |
+                   +-------------------+
 ```
+
+### Performance Targets
+
+| Metric | Target |
+|--------|--------|
+| Products per instance | 500 |
+| WebSocket connections | 25 (20 products each) |
+| WebSocket to SSE latency | <100ms |
+| Database batch size | 100 rows |
+| Database flush interval | 50ms |
+| Aggregator shards | 16 |
+| Channel high-water mark | 80% |
 
 ## Monorepo Structure
 
@@ -74,7 +91,8 @@ spot-canvas-app/                    # Monorepo root
 │
 ├── internal/
 │   ├── config/
-│   │   └── config.go               # Environment config loading
+│   │   ├── config.go               # Environment config loading
+│   │   └── buffers.go              # Buffer sizing configuration
 │   │
 │   ├── models/
 │   │   ├── candle.go               # Candle struct and methods
@@ -83,12 +101,18 @@ spot-canvas-app/                    # Monorepo root
 │   │
 │   ├── coinbase/
 │   │   ├── client.go               # WebSocket client (nhooyr.io/websocket)
+│   │   ├── connection_manager.go   # Multi-connection management (20 products/conn)
 │   │   ├── messages.go             # Message types and parsing
 │   │   └── auth.go                 # JWT authentication for Coinbase
 │   │
 │   ├── aggregator/
-│   │   ├── aggregator.go           # Candle aggregation logic
+│   │   ├── aggregator.go           # Aggregator interface
+│   │   ├── sharded_aggregator.go   # 16-shard parallel aggregator
 │   │   └── aggregator_test.go      # Unit tests
+│   │
+│   ├── metrics/
+│   │   ├── metrics.go              # Prometheus metrics definitions
+│   │   └── backpressure.go         # Backpressure detection and monitoring
 │   │
 │   ├── nats/
 │   │   ├── server.go               # Embedded NATS server setup
@@ -395,6 +419,506 @@ func StartEmbeddedServer() (*server.Server, error) {
 }
 ```
 
+## Connection Manager
+
+Manages multiple WebSocket connections to Coinbase, with 20 products per connection (the Coinbase maximum). This reduces the number of connections from 63 to 25 for 500 products.
+
+### Coinbase API Constraints
+
+- **20 subscriptions per connection** (Coinbase limit)
+- **1 connection per second** recommended for new connections
+- **750 connections per second** hard limit per IP
+
+### Implementation
+
+```go
+// internal/coinbase/connection_manager.go
+package coinbase
+
+import (
+    "context"
+    "sync"
+    "sync/atomic"
+    "time"
+
+    "spot-canvas-app/internal/models"
+)
+
+const (
+    ProductsPerConnection = 20      // Coinbase maximum
+    ConnectionRateLimit   = 1       // 1 connection per second
+    MaxConnections        = 50      // Per instance (1000 products / 20)
+    ReadBufferSize        = 100     // Per-connection message buffer
+    ReconnectBackoffBase  = 2 * time.Second
+    ReconnectBackoffMax   = 60 * time.Second
+)
+
+type ConnectionManager struct {
+    connections []*WebSocketClient
+    products    map[string]*WebSocketClient  // product -> connection mapping
+    mu          sync.RWMutex
+
+    // Output channel (bounded to prevent memory issues)
+    outputChan  chan *models.Candle
+    dropCounter atomic.Int64
+
+    ctx    context.Context
+    cancel context.CancelFunc
+}
+
+func NewConnectionManager(outputChanSize int) *ConnectionManager {
+    ctx, cancel := context.WithCancel(context.Background())
+    return &ConnectionManager{
+        connections: make([]*WebSocketClient, 0),
+        products:    make(map[string]*WebSocketClient),
+        outputChan:  make(chan *models.Candle, outputChanSize),
+        ctx:         ctx,
+        cancel:      cancel,
+    }
+}
+
+// Start initializes all WebSocket connections with rate limiting
+func (cm *ConnectionManager) Start(products []string, auth *Auth) error {
+    groups := partitionProducts(products, ProductsPerConnection)
+
+    for i, group := range groups {
+        client := NewWebSocketClient(group, auth, cm.outputChan)
+        cm.connections = append(cm.connections, client)
+
+        for _, product := range group {
+            cm.products[product] = client
+        }
+
+        go client.Run(cm.ctx)
+
+        // Rate limit: 1 connection per second
+        if i < len(groups)-1 {
+            time.Sleep(time.Second)
+        }
+    }
+
+    return nil
+}
+
+// Output returns the channel of received candles
+func (cm *ConnectionManager) Output() <-chan *models.Candle {
+    return cm.outputChan
+}
+
+func (cm *ConnectionManager) Close() {
+    cm.cancel()
+    for _, client := range cm.connections {
+        client.Close()
+    }
+}
+
+func partitionProducts(products []string, size int) [][]string {
+    var groups [][]string
+    for i := 0; i < len(products); i += size {
+        end := i + size
+        if end > len(products) {
+            end = len(products)
+        }
+        groups = append(groups, products[i:end])
+    }
+    return groups
+}
+```
+
+### WebSocket Client with Backpressure
+
+```go
+// internal/coinbase/client.go
+type WebSocketClient struct {
+    products    []string
+    auth        *Auth
+    conn        *websocket.Conn
+    output      chan<- *models.Candle
+
+    // Per-connection buffer for backpressure isolation
+    localBuffer chan []byte
+
+    // Health tracking
+    lastMessage atomic.Int64
+    reconnects  atomic.Int64
+
+    ctx    context.Context
+    cancel context.CancelFunc
+}
+
+func (c *WebSocketClient) readLoop() {
+    const BlockTimeout = 10 * time.Millisecond
+
+    for {
+        select {
+        case <-c.ctx.Done():
+            return
+        default:
+        }
+
+        _, msg, err := c.conn.Read(c.ctx)
+        if err != nil {
+            c.handleDisconnect(err)
+            return
+        }
+
+        c.lastMessage.Store(time.Now().UnixMilli())
+
+        // Non-blocking send to local buffer
+        select {
+        case c.localBuffer <- msg:
+            // Delivered
+        default:
+            // Buffer full - drop message, increment counter
+            metrics.DroppedMessages.WithLabelValues("websocket").Inc()
+        }
+    }
+}
+
+func (c *WebSocketClient) processLoop() {
+    for msg := range c.localBuffer {
+        candle, err := parseMessage(msg)
+        if err != nil {
+            continue
+        }
+
+        // Non-blocking send to output with timeout
+        select {
+        case c.output <- candle:
+            // Delivered
+        case <-time.After(10 * time.Millisecond):
+            // Global backpressure - log and drop
+            metrics.DroppedMessages.WithLabelValues("output").Inc()
+        case <-c.ctx.Done():
+            return
+        }
+    }
+}
+```
+
+## Sharded Aggregator
+
+Replaces the single-goroutine aggregator bottleneck with a 16-shard parallel aggregator. Uses FNV-1a hashing for consistent product-to-shard routing.
+
+### Why Sharding?
+
+- **Single goroutine is a bottleneck**: At 500 products with 8 granularities, processing 4000 updates/minute on one goroutine limits throughput
+- **Lock-free routing**: FNV-1a hash determines shard without coordination
+- **Horizontal scalability**: Each shard processes independently
+
+### Implementation
+
+```go
+// internal/aggregator/sharded_aggregator.go
+package aggregator
+
+import (
+    "sync"
+
+    "spot-canvas-app/internal/models"
+)
+
+const NumShards = 16  // Power of 2 for fast modulo
+
+type ShardedAggregator struct {
+    shards     [NumShards]*AggregatorShard
+    outputChan chan *models.CandleUpdate
+    wg         sync.WaitGroup
+}
+
+type AggregatorShard struct {
+    id        int
+    inputChan chan *models.Candle
+    state     map[string]*candleState  // key: product+granularity+timestamp
+    output    chan<- *models.CandleUpdate
+}
+
+type candleState struct {
+    candle    *models.Candle
+    startTime int64
+}
+
+func NewShardedAggregator(outputSize int) *ShardedAggregator {
+    sa := &ShardedAggregator{
+        outputChan: make(chan *models.CandleUpdate, outputSize),
+    }
+
+    for i := 0; i < NumShards; i++ {
+        sa.shards[i] = &AggregatorShard{
+            id:        i,
+            inputChan: make(chan *models.Candle, 256),  // Per-shard buffer
+            state:     make(map[string]*candleState),
+            output:    sa.outputChan,
+        }
+        sa.wg.Add(1)
+        go sa.shards[i].run(&sa.wg)
+    }
+
+    return sa
+}
+
+// Route sends a candle to the appropriate shard based on product ID hash
+func (sa *ShardedAggregator) Route(candle *models.Candle) {
+    shard := fnv1aHash(candle.ProductID) & (NumShards - 1)
+
+    select {
+    case sa.shards[shard].inputChan <- candle:
+        // Delivered
+    default:
+        // Shard buffer full - drop and record
+        metrics.DroppedMessages.WithLabelValues("aggregator").Inc()
+    }
+}
+
+// Output returns the channel of aggregated candle updates
+func (sa *ShardedAggregator) Output() <-chan *models.CandleUpdate {
+    return sa.outputChan
+}
+
+func (s *AggregatorShard) run(wg *sync.WaitGroup) {
+    defer wg.Done()
+
+    for candle := range s.inputChan {
+        updates := s.aggregate(candle)
+        for _, update := range updates {
+            select {
+            case s.output <- update:
+                // Delivered
+            default:
+                // Output channel full
+                metrics.DroppedMessages.WithLabelValues("aggregator_output").Inc()
+            }
+        }
+    }
+}
+
+func (s *AggregatorShard) aggregate(candle *models.Candle) []*models.CandleUpdate {
+    var updates []*models.CandleUpdate
+
+    for _, granularity := range models.AllGranularities {
+        intervalStart := alignToInterval(candle.Timestamp, granularity)
+        key := fmt.Sprintf("%s.%s.%d", candle.ProductID, granularity, intervalStart.Unix())
+
+        state, exists := s.state[key]
+        if !exists {
+            // New interval
+            state = &candleState{
+                candle: &models.Candle{
+                    Exchange:    candle.Exchange,
+                    ProductID:   candle.ProductID,
+                    Granularity: granularity,
+                    Timestamp:   intervalStart,
+                    Open:        candle.Open,
+                    High:        candle.High,
+                    Low:         candle.Low,
+                    Close:       candle.Close,
+                    Volume:      candle.Volume,
+                },
+                startTime: intervalStart.Unix(),
+            }
+            s.state[key] = state
+        } else {
+            // Update existing
+            state.candle.High = max(state.candle.High, candle.High)
+            state.candle.Low = min(state.candle.Low, candle.Low)
+            state.candle.Close = candle.Close
+            state.candle.Volume += candle.Volume
+        }
+        state.candle.LastUpdate = time.Now()
+
+        // Check if interval is complete
+        isComplete := time.Now().Unix() >= intervalStart.Unix()+int64(granularity.Seconds())
+
+        updates = append(updates, &models.CandleUpdate{
+            Candle:     state.candle,
+            IsComplete: isComplete,
+        })
+
+        // Cleanup completed intervals
+        if isComplete {
+            delete(s.state, key)
+        }
+    }
+
+    return updates
+}
+
+// fnv1aHash provides fast string hashing for shard routing
+func fnv1aHash(s string) uint32 {
+    h := uint32(2166136261)
+    for i := 0; i < len(s); i++ {
+        h ^= uint32(s[i])
+        h *= 16777619
+    }
+    return h
+}
+
+func alignToInterval(t time.Time, g models.Granularity) time.Time {
+    unix := t.Unix()
+    aligned := unix - (unix % int64(g.Seconds()))
+    return time.Unix(aligned, 0)
+}
+```
+
+## Backpressure System
+
+Monitors channel utilization and triggers adaptive responses when the system is overloaded.
+
+### Backpressure Detection
+
+```go
+// internal/metrics/backpressure.go
+package metrics
+
+import (
+    "sync"
+    "sync/atomic"
+
+    "github.com/prometheus/client_golang/prometheus"
+)
+
+const HighWaterMark = 0.80  // 80% utilization triggers warning
+
+type BackpressureMonitor struct {
+    channels map[string]*ChannelMetrics
+    mu       sync.RWMutex
+}
+
+type ChannelMetrics struct {
+    name        string
+    capacity    int
+    lengthFunc  func() int
+    utilization prometheus.Gauge
+    highWater   atomic.Int64
+}
+
+func NewBackpressureMonitor() *BackpressureMonitor {
+    return &BackpressureMonitor{
+        channels: make(map[string]*ChannelMetrics),
+    }
+}
+
+func (bm *BackpressureMonitor) RegisterChannel(name string, capacity int, lenFunc func() int) {
+    bm.mu.Lock()
+    defer bm.mu.Unlock()
+
+    bm.channels[name] = &ChannelMetrics{
+        name:       name,
+        capacity:   capacity,
+        lengthFunc: lenFunc,
+        utilization: prometheus.NewGauge(prometheus.GaugeOpts{
+            Name:        "channel_utilization_ratio",
+            ConstLabels: prometheus.Labels{"channel": name},
+        }),
+    }
+    prometheus.MustRegister(bm.channels[name].utilization)
+}
+
+type BackpressureStatus struct {
+    Channels     map[string]float64
+    HighPressure bool
+}
+
+func (bm *BackpressureMonitor) Check() BackpressureStatus {
+    bm.mu.RLock()
+    defer bm.mu.RUnlock()
+
+    status := BackpressureStatus{
+        Channels: make(map[string]float64),
+    }
+
+    for name, cm := range bm.channels {
+        length := cm.lengthFunc()
+        utilization := float64(length) / float64(cm.capacity)
+        cm.utilization.Set(utilization)
+        status.Channels[name] = utilization
+
+        if utilization > HighWaterMark {
+            status.HighPressure = true
+            cm.highWater.Add(1)
+        }
+    }
+
+    return status
+}
+```
+
+### Metrics Definition
+
+```go
+// internal/metrics/metrics.go
+package metrics
+
+import "github.com/prometheus/client_golang/prometheus"
+
+var (
+    // Throughput metrics
+    CandlesReceived = prometheus.NewCounterVec(
+        prometheus.CounterOpts{
+            Name: "candles_received_total",
+            Help: "Total candles received from WebSocket",
+        },
+        []string{"product"},
+    )
+
+    CandlesProcessed = prometheus.NewCounter(prometheus.CounterOpts{
+        Name: "candles_processed_total",
+        Help: "Total candles processed by aggregator",
+    })
+
+    DatabaseBatchesWritten = prometheus.NewCounter(prometheus.CounterOpts{
+        Name: "database_batches_written_total",
+        Help: "Total database batches written",
+    })
+
+    // Latency metrics
+    ProcessingLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
+        Name:    "candle_processing_latency_seconds",
+        Help:    "Time from WebSocket receive to NATS publish",
+        Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1},
+    })
+
+    DatabaseWriteLatency = prometheus.NewHistogram(prometheus.HistogramOpts{
+        Name:    "database_write_latency_seconds",
+        Help:    "Time to write a batch to database",
+        Buckets: []float64{0.01, 0.025, 0.05, 0.1, 0.25, 0.5},
+    })
+
+    // Backpressure metrics
+    DroppedMessages = prometheus.NewCounterVec(
+        prometheus.CounterOpts{
+            Name: "dropped_messages_total",
+            Help: "Messages dropped due to backpressure",
+        },
+        []string{"stage"},  // websocket, output, aggregator, aggregator_output
+    )
+
+    // Connection health
+    WebSocketConnections = prometheus.NewGauge(prometheus.GaugeOpts{
+        Name: "websocket_connections_active",
+        Help: "Number of active WebSocket connections",
+    })
+
+    WebSocketReconnects = prometheus.NewCounter(prometheus.CounterOpts{
+        Name: "websocket_reconnects_total",
+        Help: "Total WebSocket reconnection attempts",
+    })
+)
+
+func init() {
+    prometheus.MustRegister(
+        CandlesReceived,
+        CandlesProcessed,
+        DatabaseBatchesWritten,
+        ProcessingLatency,
+        DatabaseWriteLatency,
+        DroppedMessages,
+        WebSocketConnections,
+        WebSocketReconnects,
+    )
+}
+```
+
 ## Datastar SSE Integration
 
 The server uses Datastar's `MergeFragments()` to push candle data via SSE.
@@ -522,8 +1046,10 @@ func (h *SSEHandler) sendCandleEvent(w http.ResponseWriter, f http.Flusher, c *m
 
 ## Concurrency Model
 
+Uses the sharded architecture for high-throughput candle processing.
+
 ```go
-// cmd/server/main.go (simplified)
+// cmd/server/main.go
 func main() {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
@@ -546,47 +1072,82 @@ func main() {
         Bucket: "live-candles",
     })
 
-    // Components
-    db := storage.NewPostgresRepository(cfg.DatabaseURL)
-    agg := aggregator.NewMemoryAggregator()
-    writer := storage.NewBatchWriter(db, 50, 100*time.Millisecond)
-    publisher := natspkg.NewPublisher(nc, kv)
+    // Initialize backpressure monitor
+    bpMonitor := metrics.NewBackpressureMonitor()
 
-    // Channels
-    rawCandles := make(chan *models.Candle, 1000)
+    // Initialize components with performance-tuned settings
+    db := storage.NewPostgresRepository(cfg.DatabaseURL)
+    writer := storage.NewBatchWriter(db, 100, 50*time.Millisecond)  // Latency-optimized
+    publisher := natspkg.NewPublisher(nc)
+    kvUpdater := natspkg.NewKVUpdater(kv, 10*time.Millisecond)     // 10ms dedupe
+
+    // Sharded aggregator (16 shards)
+    aggregator := aggregator.NewShardedAggregator(1000)
+
+    // Connection manager (20 products per connection)
+    connManager := coinbase.NewConnectionManager(2000)
+
+    // Register channels for backpressure monitoring
+    bpMonitor.RegisterChannel("raw_candles", 2000, func() int {
+        return len(connManager.Output())
+    })
+    bpMonitor.RegisterChannel("aggregator_output", 1000, func() int {
+        return len(aggregator.Output())
+    })
 
     var wg sync.WaitGroup
 
-    // Start aggregator + publisher
+    // Start connection manager with sharded products
+    products := getShardedProducts(cfg.ShardIndex, cfg.ShardCount)
+    auth := coinbase.NewAuth(cfg.CoinbaseAPIKey, cfg.CoinbasePrivateKey)
+    if err := connManager.Start(products, auth); err != nil {
+        log.Fatal().Err(err).Msg("failed to start connection manager")
+    }
+
+    // Pipeline: Connection Manager → Sharded Aggregator
     wg.Add(1)
     go func() {
         defer wg.Done()
+        for candle := range connManager.Output() {
+            aggregator.Route(candle)
+        }
+    }()
+
+    // Pipeline: Sharded Aggregator → NATS + PostgreSQL
+    wg.Add(1)
+    go func() {
+        defer wg.Done()
+        for update := range aggregator.Output() {
+            // Publish to NATS immediately (low latency)
+            publisher.Publish(update)
+
+            // Update KV with deduplication
+            kvUpdater.Update(update)
+
+            // Write to PostgreSQL (batched for throughput)
+            writer.Add(update.Candle)
+        }
+    }()
+
+    // Backpressure monitoring goroutine
+    wg.Add(1)
+    go func() {
+        defer wg.Done()
+        ticker := time.NewTicker(time.Second)
+        defer ticker.Stop()
         for {
             select {
             case <-ctx.Done():
                 return
-            case candle := <-rawCandles:
-                for _, update := range agg.Update(candle) {
-                    // Publish to NATS subject
-                    publisher.Publish(&update)
-                    // Update KV bucket
-                    publisher.UpdateKV(update.Candle)
-                    // Write to PostgreSQL (batched)
-                    writer.Add(update.Candle)
+            case <-ticker.C:
+                status := bpMonitor.Check()
+                if status.HighPressure {
+                    log.Warn().Interface("channels", status.Channels).
+                        Msg("high backpressure detected")
                 }
             }
         }
     }()
-
-    // Start WebSocket clients (sharded)
-    products := getShardedProducts(cfg.ShardIndex, cfg.ShardCount)
-    for i, group := range partitionProducts(products, 8) {
-        wg.Add(1)
-        go func(id int, pids []string) {
-            defer wg.Done()
-            runWebSocketClient(ctx, id, pids, rawCandles)
-        }(i, group)
-    }
 
     // Start HTTP server with NATS connection
     wg.Add(1)
@@ -597,15 +1158,42 @@ func main() {
 
     // Wait for shutdown
     <-sigChan
+    log.Info().Msg("shutting down...")
     cancel()
+
+    // Graceful shutdown
+    connManager.Close()
+    writer.Close()
+    kvUpdater.Close()
+
     wg.Wait()
+    log.Info().Msg("shutdown complete")
 }
 ```
 
 ## Batch Writer
 
+Optimized for low latency with smaller batches (100 rows, 50ms flush).
+
 ```go
 // internal/storage/batch_writer.go
+package storage
+
+import (
+    "context"
+    "sync"
+    "time"
+
+    "spot-canvas-app/internal/metrics"
+    "spot-canvas-app/internal/models"
+)
+
+// Latency-optimized batch settings
+const (
+    DefaultBatchSize     = 100              // Smaller batches for lower latency
+    DefaultFlushInterval = 50 * time.Millisecond
+)
+
 type BatchWriter struct {
     repo          CandleRepository
     batchSize     int
@@ -669,12 +1257,112 @@ func (w *BatchWriter) flush() {
     w.buffer = make([]*models.Candle, 0, w.batchSize)
     w.mu.Unlock()
 
-    w.repo.UpsertLiveCandleBatch(w.ctx, candles)
+    start := time.Now()
+    err := w.repo.UpsertLiveCandleBatch(w.ctx, candles)
+
+    // Record metrics
+    metrics.DatabaseWriteLatency.Observe(time.Since(start).Seconds())
+    metrics.DatabaseBatchesWritten.Inc()
+
+    if err != nil {
+        log.Error().Err(err).Int("batch_size", len(candles)).Msg("batch write failed")
+    }
 }
 
 func (w *BatchWriter) Close() {
     w.cancel()
     w.wg.Wait()
+}
+```
+
+### NATS KV Updater with Deduplication
+
+```go
+// internal/nats/kv_updater.go
+package nats
+
+import (
+    "encoding/json"
+    "fmt"
+    "sync"
+    "time"
+
+    "github.com/nats-io/nats.go"
+    "spot-canvas-app/internal/models"
+)
+
+// KVUpdater deduplicates updates within a time window
+type KVUpdater struct {
+    kv            nats.KeyValue
+    pending       map[string]*models.CandleUpdate
+    mu            sync.Mutex
+    flushInterval time.Duration
+    ctx           context.Context
+    cancel        context.CancelFunc
+    wg            sync.WaitGroup
+}
+
+func NewKVUpdater(kv nats.KeyValue, flushInterval time.Duration) *KVUpdater {
+    ctx, cancel := context.WithCancel(context.Background())
+    u := &KVUpdater{
+        kv:            kv,
+        pending:       make(map[string]*models.CandleUpdate),
+        flushInterval: flushInterval,
+        ctx:           ctx,
+        cancel:        cancel,
+    }
+    u.wg.Add(1)
+    go u.runFlushLoop()
+    return u
+}
+
+func (u *KVUpdater) Update(update *models.CandleUpdate) {
+    key := fmt.Sprintf("%s.%s",
+        update.Candle.ProductID,
+        update.Candle.Granularity.String())
+
+    u.mu.Lock()
+    u.pending[key] = update  // Keep only latest update per key
+    u.mu.Unlock()
+}
+
+func (u *KVUpdater) runFlushLoop() {
+    defer u.wg.Done()
+    ticker := time.NewTicker(u.flushInterval)
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-u.ctx.Done():
+            u.flush()
+            return
+        case <-ticker.C:
+            u.flush()
+        }
+    }
+}
+
+func (u *KVUpdater) flush() {
+    u.mu.Lock()
+    if len(u.pending) == 0 {
+        u.mu.Unlock()
+        return
+    }
+    toFlush := u.pending
+    u.pending = make(map[string]*models.CandleUpdate)
+    u.mu.Unlock()
+
+    for key, update := range toFlush {
+        data, _ := json.Marshal(update.Candle)
+        if _, err := u.kv.Put(key, data); err != nil {
+            log.Error().Err(err).Str("key", key).Msg("KV put failed")
+        }
+    }
+}
+
+func (u *KVUpdater) Close() {
+    u.cancel()
+    u.wg.Wait()
 }
 ```
 
@@ -754,6 +1442,12 @@ require (
     // NATS
     github.com/nats-io/nats.go v1.x.x
     github.com/nats-io/nats-server/v2 v2.x.x
+
+    // Metrics & Monitoring
+    github.com/prometheus/client_golang v1.x.x
+
+    // Logging
+    github.com/rs/zerolog v1.x.x
 
     // Utilities
     github.com/caarlos0/env/v11 v11.x.x

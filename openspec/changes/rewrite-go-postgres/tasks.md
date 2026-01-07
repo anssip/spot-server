@@ -33,6 +33,18 @@
 - [ ] 2.10 Implement BatchWriter with flush interval and batch size
 - [ ] 2.11 Write unit tests for NATS and repository layers
 
+## Phase 2.5: Metrics and Backpressure (NEW)
+
+- [ ] 2.5.1 Create Prometheus metrics package (`internal/metrics/metrics.go`)
+- [ ] 2.5.2 Implement throughput metrics (candles_received, candles_processed, batches_written)
+- [ ] 2.5.3 Implement latency histograms (processing_latency, database_write_latency)
+- [ ] 2.5.4 Implement backpressure metrics (dropped_messages, channel_utilization)
+- [ ] 2.5.5 Implement connection health metrics (websocket_connections, reconnects)
+- [ ] 2.5.6 Create BackpressureMonitor (`internal/metrics/backpressure.go`)
+- [ ] 2.5.7 Implement channel registration and utilization tracking
+- [ ] 2.5.8 Add /metrics endpoint for Prometheus scraping
+- [ ] 2.5.9 Write unit tests for metrics package
+
 ## Phase 3: Data Models
 
 - [ ] 3.1 Create Granularity type with Seconds() and String() methods
@@ -41,26 +53,30 @@
 - [ ] 3.4 Create Product struct for trading pair metadata
 - [ ] 3.5 Write unit tests for model methods
 
-## Phase 4: Coinbase WebSocket Client
+## Phase 4: Coinbase WebSocket Client (Performance-Optimized)
 
 - [ ] 4.1 Implement JWT authentication for Coinbase Advanced Trade API
 - [ ] 4.2 Create WebSocket client with nhooyr.io/websocket
-- [ ] 4.3 Implement Connect() with timeout and retry logic
-- [ ] 4.4 Implement Subscribe() for candles channel (5 products: BTC-USD, ETH-USD, ADA-USD, DOGE-USD, SOL-USD)
-- [ ] 4.5 Implement Listen() with message parsing
-- [ ] 4.6 Implement exponential backoff reconnection
-- [ ] 4.7 Implement graceful Close() with context cancellation
-- [ ] 4.8 Write integration tests with mock WebSocket server
+- [ ] 4.3 Implement ConnectionManager with 20 products per connection
+- [ ] 4.4 Implement bounded read buffer (100 messages) per connection
+- [ ] 4.5 Implement non-blocking message processing with backpressure detection
+- [ ] 4.6 Implement Subscribe() for candles channel with rate limiting (1 conn/sec)
+- [ ] 4.7 Implement Listen() with message parsing
+- [ ] 4.8 Implement exponential backoff reconnection (2s base, 60s max)
+- [ ] 4.9 Implement graceful Close() with context cancellation
+- [ ] 4.10 Write integration tests with mock WebSocket server
 
-## Phase 5: Candle Aggregator
+## Phase 5: Sharded Candle Aggregator (Performance-Optimized)
 
-- [ ] 5.1 Implement in-memory aggregator with map[key]Candle
-- [ ] 5.2 Implement Update() that processes 1m candle into all granularities
-- [ ] 5.3 Implement interval timestamp calculation (align to granularity boundary)
-- [ ] 5.4 Implement candle completion detection
-- [ ] 5.5 Implement memory cleanup for completed candles
-- [ ] 5.6 Implement Reset() for connection recovery
-- [ ] 5.7 Write unit tests for aggregation logic
+- [ ] 5.1 Implement ShardedAggregator with 16 parallel shards
+- [ ] 5.2 Implement FNV-1a hash routing by product ID
+- [ ] 5.3 Implement per-shard buffer (256 messages)
+- [ ] 5.4 Implement aggregate() that processes 1m candle into all 8 granularities
+- [ ] 5.5 Implement interval timestamp calculation (align to granularity boundary)
+- [ ] 5.6 Implement candle completion detection
+- [ ] 5.7 Implement memory cleanup for completed candles
+- [ ] 5.8 Implement non-blocking output with drop counter
+- [ ] 5.9 Write unit tests for aggregation logic and sharding
 
 ## Phase 6: Datastar SSE Handler (NATS Subscription)
 
@@ -115,14 +131,18 @@
 - [ ] 10.5 Update cloudbuild.yaml for multi-shard deployment
 - [ ] 10.6 Create migrate.sh for running database migrations
 
-## Phase 11: Testing & Validation
+## Phase 11: Testing & Validation (Performance Focus)
 
 - [ ] 11.1 Run full test suite with coverage
 - [ ] 11.2 Test local development with docker-compose and `task live`
 - [ ] 11.3 Deploy to staging environment
 - [ ] 11.4 Validate candle data accuracy against Python service
-- [ ] 11.5 Load test with multiple simultaneous SSE clients
-- [ ] 11.6 Verify graceful shutdown behavior
+- [ ] 11.5 Create load testing script for 500 products simulation
+- [ ] 11.6 Verify <100ms end-to-end latency under load
+- [ ] 11.7 Test backpressure handling and message drop behavior
+- [ ] 11.8 Monitor Prometheus metrics during load test
+- [ ] 11.9 Load test with multiple simultaneous SSE clients
+- [ ] 11.10 Verify graceful shutdown behavior under load
 
 ## Phase 12: Cleanup
 
